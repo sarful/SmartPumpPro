@@ -96,6 +96,12 @@ export default async function Home() {
               >
                 Master Approvals
               </Link>
+              <Link
+                href="/master/admins"
+                className="rounded-full border border-emerald-600 px-3 py-2 text-emerald-100 hover:border-emerald-400 hover:text-emerald-50"
+              >
+                Master Dashboard
+              </Link>
             </div>
           </div>
           <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6 shadow-2xl shadow-cyan-900/30 backdrop-blur">
