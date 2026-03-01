@@ -24,6 +24,7 @@ const credentialsProvider = Credentials({
     await connectDB();
 
     const username = typeof creds.username === "string" ? creds.username.trim() : "";
+    const password = typeof creds.password === "string" ? creds.password : "";
 
     const verifyPassword = async (stored: string | undefined | null, provided: string) => {
       if (!stored) return false;
@@ -40,7 +41,7 @@ const credentialsProvider = Credentials({
 
     // Check master admin
     const master = await MasterAdmin.findOne({ username }).lean();
-    if (master && (await verifyPassword(master.password, creds.password))) {
+    if (master && (await verifyPassword(master.password, password))) {
       return {
         id: master._id.toString(),
         role: "master",
@@ -50,7 +51,7 @@ const credentialsProvider = Credentials({
 
     // Check active admin
     const admin = await Admin.findOne({ username, status: "active" }).lean();
-    if (admin && (await verifyPassword(admin.password, creds.password))) {
+    if (admin && (await verifyPassword(admin.password, password))) {
       return {
         id: admin._id.toString(),
         role: "admin",
@@ -61,7 +62,7 @@ const credentialsProvider = Credentials({
 
     // Check user
     const user = await User.findOne({ username, status: { $ne: 'suspended' } }).lean();
-    if (user && (await verifyPassword(user.password, creds.password))) {
+    if (user && (await verifyPassword(user.password, password))) {
       return {
         id: user._id.toString(),
         role: "user",
