@@ -61,9 +61,9 @@ export async function GET(req: NextRequest) {
       remainingMinutes: user.motorRunningTime ?? 0,
       loadShedding: admin?.loadShedding ?? false,
       adminName: admin?.username ?? null,
-      queuePosition: await getQueuePosition(user.adminId, user._id),
+      queuePosition: await getQueuePosition(user.adminId.toString(), user._id.toString()),
       runningUser: user.motorStatus === 'RUNNING' ? user.username : undefined,
-      estimatedWait: await estimateWait(user.adminId, user._id),
+      estimatedWait: await estimateWait(user.adminId.toString(), user._id.toString()),
     });
   } catch (error) {
     console.error('ESP32 poll error:', error);
