@@ -54,6 +54,8 @@ export default function UserDashboardPage() {
     remainingMinutes: number;
     loadShedding: boolean;
     queuePosition?: number;
+    runningUser?: string | null;
+    estimatedWait?: number | null;
   }>({
     url: `/api/esp32/poll?adminId=${ADMIN_ID}&userId=${USER_ID}`,
     enabled: idsValid && isUser,
