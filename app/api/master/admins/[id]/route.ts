@@ -4,14 +4,17 @@ import { connectDB } from '@/lib/mongodb';
 import Admin from '@/models/Admin';
 import { Types } from 'mongoose';
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+type ParamsObj = { id: string };
+
+// Next.js 16 treats params as Promise in route handlers; accept Promise signature directly.
+export async function DELETE(req: NextRequest, context: { params: Promise<ParamsObj> }) {
   const session = await auth();
   if (!session || session.user.role !== 'master') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const adminId = params.id;
-  if (!Types.ObjectId.isValid(adminId)) {
+  const { id: adminId } = await context.params;
+  if (!adminId || !Types.ObjectId.isValid(adminId)) {
     return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
   }
 
