@@ -1,0 +1,38 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '@/lib/auth';
+import { connectDB } from '@/lib/mongodb';
+import User from '@/models/User';
+
+export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session || session.user.role !== 'admin') {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  let body: { userId?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  const { userId } = body ?? {};
+  if (!userId) return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+
+  await connectDB();
+  const updated = await User.findOneAndUpdate(
+    { _id: userId, adminId: session.user.adminId },
+    { status: 'active', suspendReason: null },
+    { new: true },
+  ).lean();
+
+  if (!updated) {
+    const exists = await User.findOne({ _id: userId }).select({ adminId: 1 }).lean();
+    if (exists) {
+      return NextResponse.json({ error: 'User belongs to another admin' }, { status: 403 });
+    }
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  }
+
+  return NextResponse.json({ success: true, userId: updated._id });
+}
