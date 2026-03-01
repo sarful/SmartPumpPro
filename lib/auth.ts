@@ -23,7 +23,7 @@ const credentialsProvider = Credentials({
     if (!creds?.username || !creds?.password) return null;
     await connectDB();
 
-    const username = creds.username.trim();
+    const username = typeof creds.username === "string" ? creds.username.trim() : "";
 
     const verifyPassword = async (stored: string | undefined | null, provided: string) => {
       if (!stored) return false;
