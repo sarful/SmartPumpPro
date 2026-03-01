@@ -33,21 +33,7 @@ const steps = [
   "ESP32 obeys commands; timer engine bills actual minutes.",
 ];
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
-
 export default async function Home() {
-  let overview: { admins: number; users: number } | null = null;
-  try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL ?? ""}/api/overview`, {
-      cache: "no-store",
-      next: { revalidate: 0 },
-    });
-    if (res.ok) {
-      overview = await res.json();
-    }
-  } catch {
-    overview = null;
-  }
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-50">
       <div className="mx-auto flex max-w-6xl flex-col gap-12 px-6 py-16 lg:py-20">
@@ -110,12 +96,6 @@ export default async function Home() {
               >
                 Master Approvals
               </Link>
-              <span className="rounded-full border border-slate-800 px-3 py-2 text-slate-300">
-                Active Admins: {overview?.admins ?? "--"}
-              </span>
-              <span className="rounded-full border border-slate-800 px-3 py-2 text-slate-300">
-                Users: {overview?.users ?? "--"}
-              </span>
             </div>
           </div>
           <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6 shadow-2xl shadow-cyan-900/30 backdrop-blur">
