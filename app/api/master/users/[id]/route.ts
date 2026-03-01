@@ -4,14 +4,16 @@ import { connectDB } from '@/lib/mongodb';
 import User from '@/models/User';
 import { Types } from 'mongoose';
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+type ParamsObj = { id: string };
+
+export async function DELETE(req: NextRequest, context: { params: Promise<ParamsObj> }) {
   const session = await auth();
   if (!session || session.user.role !== 'master') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = params.id;
-  if (!Types.ObjectId.isValid(userId)) {
+  const { id: userId } = await context.params;
+  if (!userId || !Types.ObjectId.isValid(userId)) {
     return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
   }
 
