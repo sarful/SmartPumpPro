@@ -24,3 +24,103 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* -------- Light theme override (site-wide) -------- */
+:root {
+  --primary: #2563eb;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --surface: #f8fafc;
+  --surface-strong: #eef2f7;
+  --text-main: #121212;
+  --text-muted: #4b5563;
+  --border: #e5e7eb;
+}
+
+/* Force common dark utility classes to light equivalents */
+.bg-slate-950,
+.bg-slate-900,
+.bg-slate-800,
+.bg-slate-700,
+.bg-slate-600,
+.bg-slate-500 {
+  background-color: #ffffff !important;
+}
+
+.bg-slate-950\/50,
+.bg-slate-900\/50,
+.bg-slate-900\/60,
+.bg-slate-950\/60,
+.bg-slate-950\/70 {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* Kill dark gradients everywhere */
+[class*="bg-gradient-to-b"] {
+  background: #ffffff !important;
+}
+[class*="bg-gradient-to-r"] {
+  background: #ffffff !important;
+}
+
+/* Lighten common card backgrounds */
+.bg-slate-950\/60,
+.bg-slate-900\/60,
+.bg-slate-900\/70,
+.bg-slate-950 {
+  background-color: #f4f6f8 !important;
+}
+
+.border-slate-800,
+.border-slate-700,
+.border-slate-600,
+.border-slate-500 {
+  border-color: #dfe3e8 !important;
+}
+
+.text-slate-50,
+.text-slate-100,
+.text-slate-200,
+.text-slate-300,
+.text-slate-400,
+.text-slate-500 {
+  color: var(--text-main) !important;
+}
+
+.text-cyan-200,
+.text-cyan-300 {
+  color: var(--primary) !important;
+}
+
+.text-emerald-200,
+.text-emerald-300 {
+  color: var(--success) !important;
+}
+
+.border-slate-800,
+.border-slate-700,
+.border-slate-600 {
+  border-color: var(--border) !important;
+}
+
+.bg-emerald-500,
+.bg-emerald-400 {
+  background-color: var(--success) !important;
+}
+
+.bg-cyan-400,
+.bg-cyan-500 {
+  background-color: var(--primary) !important;
+}
+
+.bg-amber-500,
+.bg-yellow-500 {
+  background-color: var(--warning) !important;
+}
+
+.bg-red-600,
+.bg-red-500,
+.bg-rose-500 {
+  background-color: var(--danger) !important;
+}
