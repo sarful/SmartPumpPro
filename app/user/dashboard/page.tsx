@@ -36,6 +36,7 @@ export default function UserDashboardPage() {
   const [requestLoading, setRequestLoading] = useState(false);
   const [requestMessage, setRequestMessage] = useState<string | null>(null);
   const [pendingRequest, setPendingRequest] = useState<{ minutes: number; status: MinuteReqStatus } | null>(null);
+  const [localQueueCleared, setLocalQueueCleared] = useState(false);
   const [userStatus, setUserStatus] = useState<"active" | "suspended">("active");
   const [userReason, setUserReason] = useState<string | null>(null);
   const [adminStatus, setAdminStatus] = useState<"active" | "suspended">("active");
@@ -70,7 +71,7 @@ export default function UserDashboardPage() {
   const runningUser = data?.runningUser ?? null;
   const lowBalance = availableMinutes < 5;
   const estimatedWait = data?.estimatedWait ?? null;
-  const queueValue = queuePositionLive ?? queuePosition;
+  const queueValue = localQueueCleared ? null : queuePositionLive ?? queuePosition;
   const hasQueue = queueValue !== null && queueValue !== undefined;
   const effectiveStatus = optimisticStatus ?? motorStatus;
   const effectiveRemaining = optimisticRemaining ?? remainingMinutes;
@@ -87,6 +88,9 @@ export default function UserDashboardPage() {
     if (data?.motorStatus !== undefined) {
       setOptimisticStatus(null);
       setOptimisticRemaining(null);
+    }
+    if (data?.queuePosition !== undefined) {
+      setLocalQueueCleared(false);
     }
   }, [data?.motorStatus, data?.remainingMinutes]);
 
@@ -195,6 +199,7 @@ export default function UserDashboardPage() {
       }
       const data: { status: "RUNNING" | "WAITING"; queuePosition?: number } = await res.json();
       setQueuePosition(data.status === "WAITING" ? data.queuePosition ?? null : 0);
+      setLocalQueueCleared(false);
       if (data.status === "RUNNING") {
         setOptimisticStatus("RUNNING");
         setOptimisticRemaining(setMinutes);
@@ -234,7 +239,7 @@ export default function UserDashboardPage() {
       })
       .finally(() => {
         setStopLoading(false);
-        setQueuePosition(null); // ensure UI resets to normal position after stop
+        setLocalQueueCleared(true); // ensure UI resets to normal position after stop
       });
   };
 
