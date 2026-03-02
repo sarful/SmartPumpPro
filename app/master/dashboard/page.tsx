@@ -18,6 +18,7 @@ export default function MasterDashboardPage() {
   const [allUsers, setAllUsers] = useState<UserWithAdmin[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [copiedAdminId, setCopiedAdminId] = useState<string | null>(null);
 
   const [newAdmin, setNewAdmin] = useState({ username: "", password: "", status: "pending" });
   const [newUser, setNewUser] = useState({ username: "", password: "", adminId: "" });
@@ -52,6 +53,16 @@ export default function MasterDashboardPage() {
   useEffect(() => {
     if (status === "authenticated" && isMaster) loadData();
   }, [status, isMaster]);
+
+  const copyAdminId = async (adminId: string) => {
+    try {
+      await navigator.clipboard.writeText(adminId);
+      setCopiedAdminId(adminId);
+      setTimeout(() => setCopiedAdminId(null), 1500);
+    } catch {
+      setError("Failed to copy admin ID");
+    }
+  };
 
   const createAdmin = async () => {
     setError(null);
@@ -215,6 +226,18 @@ export default function MasterDashboardPage() {
                 <div className="text-slate-600 text-xs">
                   Status: {ad.status}
                   {ad.suspendReason ? ` (${ad.suspendReason})` : ""}
+                </div>
+                <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
+                  <span className="font-medium">Admin ID:</span>
+                  <code className="rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">
+                    {ad._id}
+                  </code>
+                  <button
+                    onClick={() => copyAdminId(ad._id)}
+                    className="rounded border border-slate-300 bg-white px-2 py-0.5 text-[11px] text-slate-700 hover:bg-slate-100"
+                  >
+                    {copiedAdminId === ad._id ? "Copied" : "Copy"}
+                  </button>
                 </div>
                 <div className="text-slate-600 text-xs">Load: {ad.loadShedding ? "ON" : "OFF"}</div>
                 <div className="mt-2 flex flex-wrap gap-2">
