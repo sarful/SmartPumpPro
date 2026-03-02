@@ -224,6 +224,7 @@ export default function UserDashboardPage() {
           throw new Error(msg || "Failed to stop motor");
         }
         await res.json();
+        setQueuePosition(null); // clear queue position when user stops
         router.refresh();
         setOptimisticStatus("OFF");
         setOptimisticRemaining(0);
