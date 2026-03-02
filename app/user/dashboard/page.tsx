@@ -387,7 +387,7 @@ export default function UserDashboardPage() {
                 <button
                   onClick={handleStop}
                   className="flex-1 rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-100 shadow-md shadow-slate-950/40 transition hover:border-slate-500 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={effectiveStatus === "OFF" || stopLoading || !idsValid || suspendedReason !== null}
+                  disabled={stopLoading || !idsValid || suspendedReason !== null}
                 >
                   {stopLoading ? "Stopping..." : "Stop Motor"}
                 </button>
