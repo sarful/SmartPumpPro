@@ -264,25 +264,50 @@ export default function UserDashboardPage() {
           <StatusCard title="Motor Status" value={statusLabel} status={effectiveStatus} />
           <InfoCard title="Remaining Minutes" value={`${effectiveRemaining}m`} />
           <InfoCard title="Available Minutes" value={`${availableMinutes}m`} />
-          <InfoCard
-            title="Running User"
-            value={
-              effectiveStatus === "RUNNING"
-                ? "You"
-                : runningUser
-                  ? runningUser
-                  : "—"
-            }
-          />
-          <InfoCard
-            title="Est. Wait"
-            value={
-              (queuePositionLive ?? queuePosition) && (queuePositionLive ?? queuePosition)! > 0
-                ? `${estimatedWait ?? "—"}m`
-                : "—"
-            }
-            subtle
-          />
+          {queuePosition !== null || queuePositionLive !== undefined ? (
+            <>
+              <InfoCard
+                title="Running User"
+                value={
+                  effectiveStatus === "RUNNING"
+                    ? "You"
+                    : runningUser
+                      ? runningUser
+                      : "—"
+                }
+              />
+              <InfoCard
+                title="Est. Wait"
+                value={
+                  (queuePositionLive ?? queuePosition) && (queuePositionLive ?? queuePosition)! > 0
+                    ? `${estimatedWait ?? "—"}m`
+                    : "—"
+                }
+                subtle
+              />
+              <InfoCard
+                title="Queue Position"
+                value={
+                  (queuePositionLive ?? queuePosition) === null
+                    ? "Not queued"
+                    : (queuePositionLive ?? queuePosition) === 0
+                      ? "Running"
+                      : `#${queuePositionLive ?? queuePosition}`
+                }
+              />
+              <InfoCard
+                title="Queue Awareness"
+                value={
+                  queuePosition === null
+                    ? "No queue"
+                    : queuePosition === 0
+                      ? "You are running"
+                      : `You are #${queuePosition}`
+                }
+                subtle
+              />
+            </>
+          ) : null}
           <InfoCard
             title="Request Minutes"
             value={
@@ -293,16 +318,6 @@ export default function UserDashboardPage() {
                   : `${requestMinutes}m`
             }
             subtle
-          />
-          <InfoCard
-            title="Queue Position"
-            value={
-              (queuePositionLive ?? queuePosition) === null
-                ? "Not queued"
-                : (queuePositionLive ?? queuePosition) === 0
-                  ? "Running"
-                  : `#${queuePositionLive ?? queuePosition}`
-            }
           />
         </div>
 
@@ -402,17 +417,19 @@ export default function UserDashboardPage() {
 
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               <InfoCard title="Last Set Minutes" value={`${setMinutes}m`} subtle />
-              <InfoCard
-                title="Queue Awareness"
-                value={
-                  queuePosition === null
-                    ? "No queue"
-                    : queuePosition === 0
-                      ? "You are running"
-                      : `You are #${queuePosition}`
-                }
-                subtle
-              />
+              {queuePosition !== null && (
+                <InfoCard
+                  title="Queue Awareness"
+                  value={
+                    queuePosition === null
+                      ? "No queue"
+                      : queuePosition === 0
+                        ? "You are running"
+                        : `You are #${queuePosition}`
+                  }
+                  subtle
+                />
+              )}
             </div>
 
           </div>
