@@ -400,55 +400,6 @@ export default function UserDashboardPage() {
                 </div>
               )}
 
-            <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-              <div className="text-sm text-slate-300">Request more minutes</div>
-              <div className="mt-2 flex gap-3 sm:flex-row flex-col">
-                <input
-                  type="number"
-                  min={1}
-                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-100"
-                  value={requestMinutes}
-                  onChange={(e) => setRequestMinutes(Math.max(1, Number(e.target.value)))}
-                />
-                <button
-                  onClick={async () => {
-                    setRequestError(null);
-                    setRequestMessage(null);
-                    if (!idsValid) {
-                      setRequestError("Missing or invalid session IDs");
-                      return;
-                    }
-                    setRequestLoading(true);
-                    try {
-                      const res = await fetch("/api/user/minute-request", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ minutes: requestMinutes }),
-                      });
-                      const json = await res.json();
-                      if (!res.ok) throw new Error(json.error || "Request failed");
-                      setRequestMessage("Request sent");
-                    } catch (err: any) {
-                      setRequestError(err instanceof Error ? err.message : "Unknown error");
-                    } finally {
-                      setRequestLoading(false);
-                    }
-                  }}
-                  disabled={
-                    requestLoading ||
-                    requestMinutes <= 0 ||
-                    suspendedReason !== null ||
-                    lowBalance
-                  }
-                  className="rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-900 shadow hover:bg-cyan-300 disabled:opacity-60"
-                >
-                  {requestLoading ? "Sending..." : "Send Request"}
-                </button>
-              </div>
-              {requestError && <p className="mt-2 text-xs text-red-300">{requestError}</p>}
-              {requestMessage && <p className="mt-2 text-xs text-emerald-300">{requestMessage}</p>}
-            </div>
-
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               <InfoCard title="Last Set Minutes" value={`${setMinutes}m`} subtle />
               <InfoCard
@@ -465,6 +416,55 @@ export default function UserDashboardPage() {
             </div>
 
           </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-6 shadow-xl shadow-slate-950/40">
+          <div className="text-sm text-slate-300">Request more minutes</div>
+          <div className="mt-2 flex gap-3 sm:flex-row flex-col">
+            <input
+              type="number"
+              min={1}
+              className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+              value={requestMinutes}
+              onChange={(e) => setRequestMinutes(Math.max(1, Number(e.target.value)))}
+            />
+            <button
+              onClick={async () => {
+                setRequestError(null);
+                setRequestMessage(null);
+                if (!idsValid) {
+                  setRequestError("Missing or invalid session IDs");
+                  return;
+                }
+                setRequestLoading(true);
+                try {
+                  const res = await fetch("/api/user/minute-request", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ minutes: requestMinutes }),
+                  });
+                  const json = await res.json();
+                  if (!res.ok) throw new Error(json.error || "Request failed");
+                  setRequestMessage("Request sent");
+                } catch (err: any) {
+                  setRequestError(err instanceof Error ? err.message : "Unknown error");
+                } finally {
+                  setRequestLoading(false);
+                }
+              }}
+              disabled={
+                requestLoading ||
+                requestMinutes <= 0 ||
+                suspendedReason !== null ||
+                lowBalance
+              }
+              className="rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-900 shadow hover:bg-cyan-300 disabled:opacity-60"
+            >
+              {requestLoading ? "Sending..." : "Send Request"}
+            </button>
+          </div>
+          {requestError && <p className="mt-2 text-xs text-red-300">{requestError}</p>}
+          {requestMessage && <p className="mt-2 text-xs text-emerald-300">{requestMessage}</p>}
         </div>
       </div>
     </div>
