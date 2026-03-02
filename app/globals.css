@@ -56,12 +56,13 @@ body {
   background-color: rgba(255, 255, 255, 0.9) !important;
 }
 
-/* Kill dark gradients everywhere */
-[class*="bg-gradient-to-b"] {
+/* Force all gradient backgrounds to plain white */
+[class*="bg-gradient-to-"],
+[class*="from-"],
+[class*="via-"],
+[class*="to-"] {
   background: #ffffff !important;
-}
-[class*="bg-gradient-to-r"] {
-  background: #ffffff !important;
+  background-image: none !important;
 }
 
 /* Lighten common card backgrounds */
