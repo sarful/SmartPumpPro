@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import useRealtime from "@/hooks/useRealtime";
 
 type MotorStatus = "OFF" | "RUNNING" | "HOLD";
+type MinuteReqStatus = "pending" | "approved" | "declined";
 
 const statusColors: Record<MotorStatus, string> = {
   RUNNING: "bg-emerald-500 text-emerald-50",
@@ -34,6 +35,7 @@ export default function UserDashboardPage() {
   const [requestMinutes, setRequestMinutes] = useState(10);
   const [requestLoading, setRequestLoading] = useState(false);
   const [requestMessage, setRequestMessage] = useState<string | null>(null);
+  const [pendingRequest, setPendingRequest] = useState<{ minutes: number; status: MinuteReqStatus } | null>(null);
   const [userStatus, setUserStatus] = useState<"active" | "suspended">("active");
   const [userReason, setUserReason] = useState<string | null>(null);
   const [adminStatus, setAdminStatus] = useState<"active" | "suspended">("active");
@@ -147,6 +149,23 @@ export default function UserDashboardPage() {
           setUserReason(json.suspendReason ?? null);
           setAdminStatus(json.adminStatus ?? "active");
           setAdminReason(json.adminReason ?? null);
+        }
+      } catch {
+        // ignore
+      }
+
+      // Load recent minute requests
+      try {
+        const resReq = await fetch("/api/user/minute-request", { cache: "no-store" });
+        if (resReq.ok) {
+          const jr = await resReq.json();
+          const pending = (jr.requests as any[])?.find((r) => r.status === "pending");
+          if (pending) {
+            setPendingRequest({ minutes: pending.minutes ?? 0, status: "pending" });
+            setRequestMessage(`Pending approval: ${pending.minutes}m`);
+          } else {
+            setPendingRequest(null);
+          }
         }
       } catch {
         // ignore
@@ -434,8 +453,13 @@ export default function UserDashboardPage() {
               onClick={async () => {
                 setRequestError(null);
                 setRequestMessage(null);
+                setPendingRequest(null);
                 if (!idsValid) {
                   setRequestError("Missing or invalid session IDs");
+                  return;
+                }
+                if (pendingRequest) {
+                  setRequestError("Request already pending, wait for admin approval.");
                   return;
                 }
                 setRequestLoading(true);
@@ -447,7 +471,8 @@ export default function UserDashboardPage() {
                   });
                   const json = await res.json();
                   if (!res.ok) throw new Error(json.error || "Request failed");
-                  setRequestMessage("Request sent");
+                  setPendingRequest({ minutes: requestMinutes, status: "pending" });
+                  setRequestMessage("Request sent — wait for admin approval");
                 } catch (err: any) {
                   setRequestError(err instanceof Error ? err.message : "Unknown error");
                 } finally {
@@ -458,7 +483,8 @@ export default function UserDashboardPage() {
                 requestLoading ||
                 requestMinutes <= 0 ||
                 suspendedReason !== null ||
-                lowBalance
+                lowBalance ||
+                !!pendingRequest
               }
               className="rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-900 shadow hover:bg-cyan-300 disabled:opacity-60"
             >
