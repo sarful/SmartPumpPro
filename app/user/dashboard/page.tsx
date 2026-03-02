@@ -72,11 +72,11 @@ export default function UserDashboardPage() {
   const lowBalance = availableMinutes < 5;
   const estimatedWait = data?.estimatedWait ?? null;
   const queueValue = localQueueCleared ? null : queuePositionLive ?? queuePosition;
+  const effectiveStatus = optimisticStatus ?? motorStatus;
+  const effectiveRemaining = optimisticRemaining ?? remainingMinutes;
   const showQueueCards =
     effectiveStatus === "RUNNING" ||
     (queueValue !== null && queueValue !== undefined && queueValue !== 0);
-  const effectiveStatus = optimisticStatus ?? motorStatus;
-  const effectiveRemaining = optimisticRemaining ?? remainingMinutes;
   const isSuspendedUser = userStatus === "suspended";
   const isSuspendedAdmin = adminStatus === "suspended";
   const suspendedReason = isSuspendedUser
