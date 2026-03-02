@@ -72,7 +72,9 @@ export default function UserDashboardPage() {
   const lowBalance = availableMinutes < 5;
   const estimatedWait = data?.estimatedWait ?? null;
   const queueValue = localQueueCleared ? null : queuePositionLive ?? queuePosition;
-  const hasQueue = queueValue !== null && queueValue !== undefined;
+  const showQueueCards =
+    effectiveStatus === "RUNNING" ||
+    (queueValue !== null && queueValue !== undefined && queueValue !== 0);
   const effectiveStatus = optimisticStatus ?? motorStatus;
   const effectiveRemaining = optimisticRemaining ?? remainingMinutes;
   const isSuspendedUser = userStatus === "suspended";
@@ -294,7 +296,7 @@ export default function UserDashboardPage() {
           <StatusCard title="Motor Status" value={statusLabel} status={effectiveStatus} />
           <InfoCard title="Remaining Minutes" value={`${effectiveRemaining}m`} />
           <InfoCard title="Available Minutes" value={`${availableMinutes}m`} />
-          {hasQueue ? (
+          {showQueueCards && (
             <>
               <InfoCard
                 title="Running User"
@@ -309,7 +311,7 @@ export default function UserDashboardPage() {
               <InfoCard
                 title="Est. Wait"
                 value={
-                  queueValue !== null && queueValue !== undefined && queueValue > 0
+                  queueValue && queueValue > 0
                     ? `${estimatedWait ?? "—"}m`
                     : "—"
                 }
@@ -318,7 +320,7 @@ export default function UserDashboardPage() {
               <InfoCard
                 title="Queue Position"
                 value={
-                  queueValue === null
+                  queueValue === null || queueValue === undefined
                     ? "Not queued"
                     : queueValue === 0
                       ? "Running"
@@ -328,7 +330,7 @@ export default function UserDashboardPage() {
               <InfoCard
                 title="Queue Awareness"
                 value={
-                  queueValue === null
+                  queueValue === null || queueValue === undefined
                     ? "No queue"
                     : queueValue === 0
                       ? "You are running"
@@ -337,7 +339,7 @@ export default function UserDashboardPage() {
                 subtle
               />
             </>
-          ) : null}
+          )}
           <InfoCard
             title="Request Minutes"
             value={
