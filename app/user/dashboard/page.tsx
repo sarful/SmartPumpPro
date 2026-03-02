@@ -39,6 +39,7 @@ export default function UserDashboardPage() {
   const [requestMessage, setRequestMessage] = useState<string | null>(null);
   const [pendingRequest, setPendingRequest] = useState<{ minutes: number; status: MinuteReqStatus } | null>(null);
   const [localQueueCleared, setLocalQueueCleared] = useState(false);
+  const [showRequest, setShowRequest] = useState(false);
   const [userStatus, setUserStatus] = useState<"active" | "suspended">("active");
   const [userReason, setUserReason] = useState<string | null>(null);
   const [adminStatus, setAdminStatus] = useState<"active" | "suspended">("active");
@@ -170,6 +171,7 @@ export default function UserDashboardPage() {
           if (pending) {
             setPendingRequest({ minutes: pending.minutes ?? 0, status: "pending" });
             setRequestMessage(`Pending approval: ${pending.minutes}m`);
+            setShowRequest(true);
           } else {
             setPendingRequest(null);
           }
@@ -448,9 +450,19 @@ export default function UserDashboardPage() {
                 </div>
               )}
 
-          </div>
         </div>
+      </div>
 
+      <div className="flex w-full max-w-6xl items-center justify-end">
+        <button
+          onClick={() => setShowRequest((s) => !s)}
+          className="rounded-full bg-[#2563eb] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#1e4fbf]"
+        >
+          {showRequest ? "Hide Buy Minutes" : "Buy Minutes"}
+        </button>
+      </div>
+
+      {showRequest && (
         <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-6 shadow-xl shadow-slate-950/40">
           <div className="text-sm text-slate-300">Request more minutes</div>
           <div className="mt-2 flex gap-3 sm:flex-row flex-col">
@@ -506,7 +518,7 @@ export default function UserDashboardPage() {
           {requestError && <p className="mt-2 text-xs text-red-300">{requestError}</p>}
           {requestMessage && <p className="mt-2 text-xs text-emerald-300">{requestMessage}</p>}
         </div>
-      </div>
+      )}
     </div>
   );
 }
