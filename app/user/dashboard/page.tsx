@@ -224,7 +224,7 @@ export default function UserDashboardPage() {
           throw new Error(msg || "Failed to stop motor");
         }
         await res.json();
-        setQueuePosition(null); // clear queue position when user stops
+        setQueuePosition(null); // clear UI queue position
         router.refresh();
         setOptimisticStatus("OFF");
         setOptimisticRemaining(0);
@@ -232,7 +232,10 @@ export default function UserDashboardPage() {
       .catch((err: any) => {
         setStopError(err instanceof Error ? err.message : "Unknown error");
       })
-      .finally(() => setStopLoading(false));
+      .finally(() => {
+        setStopLoading(false);
+        setQueuePosition(null); // ensure UI resets to normal position after stop
+      });
   };
 
   return (
