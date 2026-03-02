@@ -463,34 +463,54 @@ export default function UserDashboardPage() {
                 subtle
               />
             </div>
-          </div>
 
-          <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-6 shadow-xl shadow-slate-950/40">
-            <div className="text-sm uppercase tracking-[0.18em] text-cyan-300">
-              Debug panel
-            </div>
-            <div className="mt-3 space-y-2 text-sm text-slate-300">
-              <p>Motor: {effectiveStatus}</p>
-              <p>Remaining: {effectiveRemaining} min</p>
-              <p>Available: {availableMinutes} min</p>
-              <p>Queue position: {queuePosition ?? "none"}</p>
-              <p>Load shedding: {loadShedding ? "active" : "off"}</p>
-              {loading && <p className="text-cyan-300">Loading...</p>}
-              {error && <p className="text-red-300">Error: {error.message}</p>}
-              {startError && <p className="text-red-300">Start error: {startError}</p>}
-              {stopError && <p className="text-red-300">Stop error: {stopError}</p>}
-              {extendError && <p className="text-red-300">Extend error: {extendError}</p>}
-            </div>
-            <div className="mt-6 flex flex-wrap gap-3 text-xs text-slate-400">
-              <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-emerald-200">
-                Running = green
-              </span>
-              <span className="rounded-full bg-amber-500/20 px-3 py-1 text-amber-200">
-                Hold = yellow/red
-              </span>
-              <span className="rounded-full bg-slate-600/30 px-3 py-1 text-slate-200">
-                Off = gray
-              </span>
+            <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+              <div className="text-sm text-slate-300">Request more minutes</div>
+              <div className="mt-2 flex gap-3 sm:flex-row flex-col">
+                <input
+                  type="number"
+                  min={1}
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                  value={requestMinutes}
+                  onChange={(e) => setRequestMinutes(Math.max(1, Number(e.target.value)))}
+                />
+                <button
+                  onClick={async () => {
+                    setRequestError(null);
+                    setRequestMessage(null);
+                    if (!idsValid) {
+                      setRequestError("Missing or invalid session IDs");
+                      return;
+                    }
+                    setRequestLoading(true);
+                    try {
+                      const res = await fetch("/api/user/minute-request", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ minutes: requestMinutes }),
+                      });
+                      const json = await res.json();
+                      if (!res.ok) throw new Error(json.error || "Request failed");
+                      setRequestMessage("Request sent");
+                    } catch (err: any) {
+                      setRequestError(err instanceof Error ? err.message : "Unknown error");
+                    } finally {
+                      setRequestLoading(false);
+                    }
+                  }}
+                  disabled={
+                    requestLoading ||
+                    requestMinutes <= 0 ||
+                    suspendedReason !== null ||
+                    lowBalance
+                  }
+                  className="rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-900 shadow hover:bg-cyan-300 disabled:opacity-60"
+                >
+                  {requestLoading ? "Sending..." : "Send Request"}
+                </button>
+              </div>
+              {requestError && <p className="mt-2 text-xs text-red-300">{requestError}</p>}
+              {requestMessage && <p className="mt-2 text-xs text-emerald-300">{requestMessage}</p>}
             </div>
           </div>
         </div>
