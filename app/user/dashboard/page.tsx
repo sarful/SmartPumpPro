@@ -9,10 +9,12 @@ type MotorStatus = "OFF" | "RUNNING" | "HOLD";
 type MinuteReqStatus = "pending" | "approved" | "declined";
 
 const statusColors: Record<MotorStatus, string> = {
-  RUNNING: "bg-emerald-500 text-emerald-50",
-  HOLD: "bg-amber-500 text-amber-50",
-  OFF: "bg-slate-500 text-slate-50",
+  RUNNING: "bg-emerald-100 text-emerald-800 border border-emerald-200",
+  HOLD: "bg-amber-100 text-amber-800 border border-amber-200",
+  OFF: "bg-gray-200 text-gray-700 border border-gray-300",
 };
+
+const cardClass = "rounded-2xl border border-gray-200 bg-white shadow-sm p-4";
 
 export default function UserDashboardPage() {
   const router = useRouter();
@@ -437,7 +439,7 @@ export default function UserDashboardPage() {
                     lowBalance ||
                     suspendedReason !== null
                   }
-                  className="rounded-xl border border-cyan-500 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/20 disabled:opacity-50"
+                  className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-600 disabled:opacity-50"
                 >
                   {extendLoading ? "Adding..." : "+ Add 1 minute"}
                 </button>
