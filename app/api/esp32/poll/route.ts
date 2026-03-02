@@ -4,6 +4,7 @@ import User from '@/models/User';
 import Admin from '@/models/Admin';
 import { getQueuePosition } from '@/lib/queue-engine';
 import { tickRunningMotors } from '@/lib/timer-engine';
+import { activateLoadShedding, clearLoadShedding } from '@/lib/loadshedding-engine';
 
 const BAD_REQUEST = { error: 'adminId is required' };
 
@@ -20,12 +21,6 @@ export async function GET(req: NextRequest) {
 
     if (!adminId) {
       return NextResponse.json(BAD_REQUEST, { status: 400 });
-    }
-
-    // If ESP32 sends local load-shedding reading, persist it on admin
-    if (lsParam !== null) {
-      const sensed = ['1', 'true', 'on', 'yes'].includes(lsParam.toLowerCase());
-      await Admin.updateOne({ _id: adminId }, { loadShedding: sensed }).lean();
     }
 
     // If userId missing, derive by admin: pick RUNNING if any, else top of queue user if present.
@@ -49,21 +44,41 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'User not found for admin' }, { status: 404 });
     }
 
-    const adminLookupId = adminId ?? user.adminId?.toString();
-    const admin = adminLookupId
+    const adminLookupId = (adminId ?? user.adminId?.toString()) || null;
+    let admin = adminLookupId
       ? await Admin.findById(adminLookupId).select({ loadShedding: 1, username: 1 }).lean()
       : null;
 
-    // If admin missing, still return user state (avoid failing ESP32 polling)
+    // React to ESP32 sensed load shedding: pause/resume motors
+    if (adminLookupId && lsParam !== null) {
+      const sensed = ['1', 'true', 'on', 'yes'].includes(lsParam.toLowerCase());
+      const current = admin?.loadShedding ?? false;
+      if (sensed !== current) {
+        if (sensed) {
+          await activateLoadShedding(adminLookupId);
+        } else {
+          await clearLoadShedding(adminLookupId);
+        }
+        admin = { ...(admin || {}), loadShedding: sensed, username: admin?.username } as any;
+      }
+    }
+
+    const freshUser = await User.findById(user._id)
+      .select({ motorStatus: 1, motorRunningTime: 1, adminId: 1, username: 1 })
+      .lean();
+
+    if (!freshUser) {
+      return NextResponse.json({ error: 'User not found after state update' }, { status: 404 });
+    }
 
     return NextResponse.json({
-      motorStatus: user.motorStatus,
-      remainingMinutes: user.motorRunningTime ?? 0,
+      motorStatus: freshUser.motorStatus,
+      remainingMinutes: freshUser.motorRunningTime ?? 0,
       loadShedding: admin?.loadShedding ?? false,
       adminName: admin?.username ?? null,
-      queuePosition: await getQueuePosition(user.adminId.toString(), user._id.toString()),
-      runningUser: user.motorStatus === 'RUNNING' ? user.username : undefined,
-      estimatedWait: await estimateWait(user.adminId.toString(), user._id.toString()),
+      queuePosition: await getQueuePosition(freshUser.adminId.toString(), freshUser._id.toString()),
+      runningUser: freshUser.motorStatus === 'RUNNING' ? freshUser.username : undefined,
+      estimatedWait: await estimateWait(freshUser.adminId.toString(), freshUser._id.toString()),
     });
   } catch (error) {
     console.error('ESP32 poll error:', error);

@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useSession, signIn, signOut } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
 type PendingAdmin = { _id: string; username: string; status: string };
 
 export default function MasterAdminsPage() {
+  const router = useRouter();
   const { data: session, status } = useSession();
   const [admins, setAdmins] = useState<PendingAdmin[]>([]);
   const [loading, setLoading] = useState(false);
@@ -15,6 +17,11 @@ export default function MasterAdminsPage() {
   const isMaster = session?.user?.role === "master";
 
   useEffect(() => {
+    if (status === "authenticated" && isMaster) {
+      router.replace("/master/dashboard");
+      return;
+    }
+
     if (status === "loading") return;
     if (!isMaster) return;
     const loadPending = async () => {
@@ -32,7 +39,7 @@ export default function MasterAdminsPage() {
       }
     };
     loadPending();
-  }, [isMaster, status]);
+  }, [isMaster, router, status]);
 
   const handleApprove = async (adminId: string) => {
     setError(null);

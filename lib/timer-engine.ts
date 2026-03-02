@@ -3,6 +3,7 @@ import { connectDB } from '@/lib/mongodb';
 import User, { UserDocument } from '@/models/User';
 import Queue from '@/models/Queue';
 import { startNextUser } from '@/lib/queue-engine';
+import Admin from '@/models/Admin';
 
 const toObjectId = (id: string | Types.ObjectId): Types.ObjectId =>
   typeof id === 'string' ? new Types.ObjectId(id) : id;
@@ -21,6 +22,11 @@ export async function tickRunningMotors(): Promise<void> {
 
   for (const user of runningUsers) {
     if (!user.motorStartTime) continue;
+
+    // If the admin is under load shedding, skip decrementing (should be HOLDed, but guard anyway)
+    const admin = await Admin.findById(user.adminId).select({ loadShedding: 1 }).lean();
+    if (admin?.loadShedding) continue;
+
     const elapsedMinutesTotal = Math.floor((now - new Date(user.motorStartTime).getTime()) / 60000);
     if (elapsedMinutesTotal <= 0) continue;
 

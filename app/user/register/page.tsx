@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 type AdminOption = { _id: string; username: string };
 
 export default function UserRegisterPage() {
+  const router = useRouter();
   const [admins, setAdmins] = useState<AdminOption[]>([]);
   const [adminId, setAdminId] = useState("");
   const [username, setUsername] = useState("");
@@ -69,6 +71,7 @@ export default function UserRegisterPage() {
       setSuccess("User created successfully.");
       setUsername("");
       setPassword("");
+      router.push("/user/login");
     } catch (err: any) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {

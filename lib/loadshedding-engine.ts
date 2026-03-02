@@ -23,12 +23,22 @@ export async function clearLoadShedding(adminId: string | Types.ObjectId) {
   const adminObjectId = toObjectId(adminId);
   await Admin.updateOne({ _id: adminObjectId }, { loadShedding: false });
 
-  // Resume previously held motor (only one should exist per admin by interlock)
-  const held = await User.findOneAndUpdate(
-    { adminId: adminObjectId, motorStatus: 'HOLD' },
-    { motorStatus: 'RUNNING', motorStartTime: new Date() },
-    { sort: { motorRunningTime: -1 }, new: true },
-  );
+  // Resume all held motors for this admin (interlock means normally one)
+  const now = new Date();
+  const heldUsers = await User.find({ adminId: adminObjectId, motorStatus: 'HOLD' });
 
-  return held;
+  for (const user of heldUsers) {
+    user.motorStatus = 'RUNNING';
+    user.motorStartTime = now;
+    // Reset baseline so timer delta starts fresh from current remaining time
+    user.lastSetMinutes = user.motorRunningTime ?? user.lastSetMinutes ?? 0;
+    await user.save();
+  }
+
+  // Return one example (first) resumed user if needed by callers
+  const resumed = await User.findOne({ adminId: adminObjectId, motorStatus: 'RUNNING' })
+    .select({ _id: 1, username: 1, motorRunningTime: 1 })
+    .lean();
+
+  return resumed;
 }

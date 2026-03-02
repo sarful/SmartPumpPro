@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { signIn } from "next-auth/react";
+import { getSession, signIn } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -29,7 +29,17 @@ export default function AdminLoginPage() {
     if (res?.error) {
       setError(res.error);
     } else {
-      router.push("/admin/dashboard");
+      const session = await getSession();
+      const role = session?.user?.role;
+      if (role === "master") {
+        router.push("/master/dashboard");
+      } else if (role === "admin") {
+        router.push("/admin/dashboard");
+      } else if (role === "user") {
+        router.push("/user/dashboard");
+      } else {
+        router.push("/admin/dashboard");
+      }
     }
   };
 

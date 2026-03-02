@@ -41,13 +41,13 @@ export default function AdminDashboardPage() {
   const [rechargeTarget, setRechargeTarget] = useState<string>("");
   const [rechargeMinutes, setRechargeMinutes] = useState(0);
   const [rechargeLoading, setRechargeLoading] = useState(false);
-  const [toggleLoading, setToggleLoading] = useState(false);
   const [requests, setRequests] = useState<
     { _id: string; userId: string | { _id: string; username: string }; minutes: number; createdAt: string }[]
   >([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
   const [suspendError, setSuspendError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [stopResetLoadingUserId, setStopResetLoadingUserId] = useState<string | null>(null);
 
   const isAdmin = session?.user?.role === "admin";
 
@@ -125,25 +125,6 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const handleToggleLoadShedding = async (enabled: boolean) => {
-    setToggleLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/admin/loadshedding", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Toggle failed");
-      setLoadShedding(json.loadShedding);
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Toggle failed");
-    } finally {
-      setToggleLoading(false);
-    }
-  };
-
   const handleApproveRequest = async (id: string) => {
     const res = await fetch("/api/admin/minute-requests/approve", {
       method: "POST",
@@ -183,6 +164,30 @@ export default function AdminDashboardPage() {
       return;
     }
     await loadData();
+  };
+
+  const handleStopResetMotor = async (userId: string) => {
+    setError(null);
+    setStatusMessage(null);
+    setStopResetLoadingUserId(userId);
+    try {
+      const res = await fetch("/api/motor/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error || "Failed to stop/reset motor");
+        return;
+      }
+      setStatusMessage("User motor stopped/reset successfully");
+      await loadData();
+    } catch (err: any) {
+      setError(err instanceof Error ? err.message : "Failed to stop/reset motor");
+    } finally {
+      setStopResetLoadingUserId(null);
+    }
   };
 
   const handleSuspendUser = async (userId: string) => {
@@ -287,30 +292,7 @@ export default function AdminDashboardPage() {
           <div className="text-sm text-slate-300">Loading data...</div>
         ) : (
           <>
-            <section className="grid gap-4 lg:grid-cols-3">
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 shadow-xl shadow-slate-950/40">
-            <div className="text-sm text-slate-400">Load Shedding</div>
-            <div className="mt-2 text-lg font-semibold text-slate-100">
-              {loadShedding ? "ACTIVE" : "OFF"}
-            </div>
-            <div className="mt-3 flex gap-2">
-                  <button
-                    onClick={() => handleToggleLoadShedding(true)}
-                    disabled={toggleLoading}
-                    className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-amber-950 hover:bg-amber-400 disabled:opacity-50"
-                  >
-                    Activate
-                  </button>
-                  <button
-                    onClick={() => handleToggleLoadShedding(false)}
-                    disabled={toggleLoading}
-                    className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-100 hover:border-cyan-400 hover:text-cyan-200 disabled:opacity-50"
-                  >
-                    Deactivate
-                  </button>
-                </div>
-              </div>
-
+            <section className="mx-auto grid w-full max-w-5xl gap-4 lg:grid-cols-2">
               <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 shadow-xl shadow-slate-950/40">
                 <div className="text-sm text-slate-400">Create User</div>
                 <input
@@ -367,7 +349,7 @@ export default function AdminDashboardPage() {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
+            <section className="mx-auto w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-slate-400">Users</div>
@@ -401,8 +383,15 @@ export default function AdminDashboardPage() {
                   </td>
                     <td className="px-2 py-2">
                       <button
+                        onClick={() => handleStopResetMotor(u._id)}
+                        disabled={stopResetLoadingUserId === u._id}
+                        className="rounded-lg border border-cyan-500 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-800/50 disabled:opacity-60"
+                      >
+                        {stopResetLoadingUserId === u._id ? "Processing..." : "Stop/Reset"}
+                      </button>
+                      <button
                         onClick={() => handleDeleteUser(u._id)}
-                        className="rounded-lg border border-red-600 px-2 py-1 text-xs text-red-200 hover:bg-red-800/50"
+                        className="ml-2 rounded-lg border border-red-600 px-2 py-1 text-xs text-red-200 hover:bg-red-800/50"
                       >
                         Delete
                       </button>
@@ -436,7 +425,7 @@ export default function AdminDashboardPage() {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
+            <section className="mx-auto w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
               <div className="text-sm text-slate-400">Queue / Activity</div>
               <div className="mt-2 text-lg font-semibold text-slate-100">Running & Waiting</div>
               <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -463,7 +452,7 @@ export default function AdminDashboardPage() {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
+            <section className="mx-auto w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
               <div className="text-sm text-slate-400">Minute Requests</div>
               <div className="mt-3 text-xs text-slate-400">
                 Pending requests from your users

@@ -1,6 +1,7 @@
 import { NextResponse, NextRequest } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import Admin from '@/models/Admin';
+import MasterAdmin from '@/models/MasterAdmin';
 import { hash } from 'bcryptjs';
 import { auth } from '@/lib/auth';
 
@@ -12,9 +13,6 @@ type Body = {
 export async function POST(req: NextRequest) {
   try {
     const session = await auth();
-    if (!session || session.user.role !== 'master') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
 
     let body: Body;
     try {
@@ -42,13 +40,31 @@ export async function POST(req: NextRequest) {
 
     const hashed = await hash(password, 10);
 
-    await Admin.create({
+    const adminPayload: {
+      username: string;
+      password: string;
+      status: 'pending';
+      loadShedding: boolean;
+      createdBy?: string;
+    } = {
       username: username.trim(),
       password: hashed,
       status: 'pending',
       loadShedding: false,
-      createdBy: session.user.id,
-    });
+    };
+
+    if (session?.user?.role === 'master' && session.user.id) {
+      adminPayload.createdBy = session.user.id;
+    } else {
+      // Compatibility fallback: if older runtime still enforces createdBy required,
+      // attach the first master admin id so public registration can stay pending.
+      const seedMaster = await MasterAdmin.findOne().select({ _id: 1 }).lean();
+      if (seedMaster?._id) {
+        adminPayload.createdBy = seedMaster._id.toString();
+      }
+    }
+
+    await Admin.create(adminPayload);
 
     return NextResponse.json({
       success: true,

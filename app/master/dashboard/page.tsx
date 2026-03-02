@@ -157,15 +157,15 @@ export default function MasterDashboardPage() {
     loadData();
   };
 
-  if (status === "loading") return <div className="p-6 text-slate-200">Loading session...</div>;
+  if (status === "loading") return <div className="p-6 text-slate-600">Loading session...</div>;
   if (!isMaster) {
     return (
-      <div className="min-h-screen bg-slate-950 px-4 py-10 text-slate-100">
-        <div className="mx-auto max-w-lg rounded-xl border border-slate-800 bg-slate-900/70 p-6 text-center">
+      <div className="min-h-screen bg-white px-4 py-10 text-slate-900">
+        <div className="mx-auto max-w-lg rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm">
           <p className="text-lg font-semibold">Master admin access required.</p>
           <button
             onClick={() => signOut({ callbackUrl: "/admin/login" })}
-            className="mt-4 rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-900"
+            className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
           >
             Go to Login
           </button>
@@ -175,24 +175,24 @@ export default function MasterDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 px-4 py-8 text-slate-50">
+    <div className="min-h-screen bg-white px-4 py-8 text-slate-900">
       <div className="mx-auto flex max-w-6xl flex-col gap-6">
         <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm uppercase tracking-[0.2em] text-cyan-300">SmartPump Pro</p>
+            <p className="text-sm uppercase tracking-[0.2em] text-blue-600">SmartPump Pro</p>
             <h1 className="text-2xl font-semibold sm:text-3xl">Master Dashboard</h1>
-            <p className="text-sm text-slate-300">Create/approve/delete admins, manage users system-wide.</p>
+            <p className="text-sm text-slate-600">Create, approve, suspend and delete admins and users.</p>
           </div>
           <button
             onClick={() => signOut({ callbackUrl: "/admin/login" })}
-            className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
+            className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-slate-400 hover:text-slate-900"
           >
             Logout
           </button>
         </header>
 
         {error && (
-          <div className="rounded-lg border border-red-500/40 bg-red-900/40 px-3 py-2 text-sm text-red-100">
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             {error}
           </div>
         )}
@@ -206,54 +206,54 @@ export default function MasterDashboardPage() {
           </div>
         )}
 
-        <section className="rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
-          <div className="text-sm text-slate-400">All Admins</div>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-sm text-slate-600">All Admins</div>
           <div className="mt-3 grid gap-2 md:grid-cols-2">
             {allAdmins.map((ad) => (
-              <div key={ad._id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-sm text-slate-100">
+              <div key={ad._id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900">
                 <div className="font-semibold">{ad.username}</div>
-                <div className="text-slate-400 text-xs">
+                <div className="text-slate-600 text-xs">
                   Status: {ad.status}
                   {ad.suspendReason ? ` (${ad.suspendReason})` : ""}
                 </div>
-                <div className="text-slate-400 text-xs">Load: {ad.loadShedding ? "ON" : "OFF"}</div>
+                <div className="text-slate-600 text-xs">Load: {ad.loadShedding ? "ON" : "OFF"}</div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {ad.status === "suspended" ? (
                     <button
                       onClick={() => unsuspendAdmin(ad._id)}
-                      className="rounded-lg border border-emerald-500 px-3 py-1 text-xs text-emerald-200 hover:bg-emerald-800/40"
+                      className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs text-emerald-700 hover:bg-emerald-100"
                     >
                       Unsuspend
                     </button>
                   ) : (
                     <button
                       onClick={() => suspendAdmin(ad._id)}
-                      className="rounded-lg border border-amber-500 px-3 py-1 text-xs text-amber-200 hover:bg-amber-800/40"
+                      className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1 text-xs text-amber-700 hover:bg-amber-100"
                     >
                       Suspend
                     </button>
                   )}
                   <button
                     onClick={() => deleteAdmin(ad._id)}
-                    className="rounded-lg border border-red-600 px-3 py-1 text-xs text-red-200 hover:bg-red-800/40"
+                    className="rounded-lg border border-red-300 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100"
                   >
                     Delete
                   </button>
                 </div>
               </div>
             ))}
-            {allAdmins.length === 0 && <div className="text-sm text-slate-300">No admins.</div>}
+            {allAdmins.length === 0 && <div className="text-sm text-slate-500">No admins.</div>}
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
-          <div className="text-sm text-slate-400">All Users</div>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-sm text-slate-600">All Users</div>
           <div className="mt-3 grid gap-2 md:grid-cols-2">
             {allUsers.map((u) => (
-              <div key={u._id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-sm text-slate-100">
+              <div key={u._id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900">
                 <div className="font-semibold">{u.username}</div>
-                <div className="text-slate-400 text-xs">Admin: {u.adminName ?? u.adminId}</div>
-                <div className="text-slate-400 text-xs">
+                <div className="text-slate-600 text-xs">Admin: {u.adminName ?? u.adminId}</div>
+                <div className="text-slate-600 text-xs">
                   Status: {u.status ?? "active"}
                   {u.suspendReason ? ` (${u.suspendReason})` : ""}
                 </div>
@@ -261,49 +261,49 @@ export default function MasterDashboardPage() {
                   {u.status === "suspended" ? (
                     <button
                       onClick={() => unsuspendUser(u._id)}
-                      className="rounded-lg border border-emerald-500 px-3 py-1 text-xs text-emerald-200 hover:bg-emerald-800/40"
+                      className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs text-emerald-700 hover:bg-emerald-100"
                     >
                       Unsuspend
                     </button>
                   ) : (
                     <button
                       onClick={() => suspendUser(u._id)}
-                      className="rounded-lg border border-amber-500 px-3 py-1 text-xs text-amber-200 hover:bg-amber-800/40"
+                      className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1 text-xs text-amber-700 hover:bg-amber-100"
                     >
                       Suspend
                     </button>
                   )}
                   <button
                     onClick={() => deleteUser(u._id)}
-                    className="rounded-lg border border-red-600 px-3 py-1 text-xs text-red-200 hover:bg-red-800/40"
+                    className="rounded-lg border border-red-300 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100"
                   >
                     Delete
                   </button>
                 </div>
               </div>
             ))}
-            {allUsers.length === 0 && <div className="text-sm text-slate-300">No users.</div>}
+            {allUsers.length === 0 && <div className="text-sm text-slate-500">No users.</div>}
           </div>
         </section>
 
         <section className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 shadow-xl shadow-slate-950/40">
-            <div className="text-sm text-slate-400">Create Admin</div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="text-sm text-slate-600">Create Admin</div>
             <input
-              className="mt-3 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+              className="mt-3 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
               placeholder="username"
               value={newAdmin.username}
               onChange={(e) => setNewAdmin((p) => ({ ...p, username: e.target.value }))}
             />
             <input
               type="password"
-              className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+              className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
               placeholder="password (min 6)"
               value={newAdmin.password}
               onChange={(e) => setNewAdmin((p) => ({ ...p, password: e.target.value }))}
             />
             <select
-              className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+              className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
               value={newAdmin.status}
               onChange={(e) => setNewAdmin((p) => ({ ...p, status: e.target.value }))}
             >
@@ -312,29 +312,29 @@ export default function MasterDashboardPage() {
             </select>
             <button
               onClick={createAdmin}
-              className="mt-3 w-full rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-900/30 hover:bg-emerald-400"
+              className="mt-3 w-full rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
             >
               Create Admin
             </button>
           </div>
 
-          <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 shadow-xl shadow-slate-950/40">
-            <div className="text-sm text-slate-400">Create User</div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="text-sm text-slate-600">Create User</div>
             <input
-              className="mt-3 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+              className="mt-3 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
               placeholder="username"
               value={newUser.username}
               onChange={(e) => setNewUser((p) => ({ ...p, username: e.target.value }))}
             />
             <input
               type="password"
-              className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+              className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
               placeholder="password (min 6)"
               value={newUser.password}
               onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))}
             />
             <select
-              className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+              className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
               value={newUser.adminId}
               onChange={(e) => setNewUser((p) => ({ ...p, adminId: e.target.value }))}
             >
@@ -347,7 +347,7 @@ export default function MasterDashboardPage() {
             </select>
             <button
               onClick={createUser}
-              className="mt-3 w-full rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-900 shadow-lg shadow-cyan-900/30 hover:bg-cyan-300 disabled:opacity-60"
+              className="mt-3 w-full rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
               disabled={!newUser.adminId}
             >
               Create User
@@ -355,11 +355,11 @@ export default function MasterDashboardPage() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
-          <div className="text-sm text-slate-400">Admins</div>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-sm text-slate-600">Admins</div>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="text-slate-400">
+              <thead className="text-slate-500">
                 <tr>
                   <th className="px-2 py-2 text-left">Username</th>
                   <th className="px-2 py-2 text-left">Status</th>
@@ -367,7 +367,7 @@ export default function MasterDashboardPage() {
                   <th className="px-2 py-2 text-left">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800 text-slate-100">
+              <tbody className="divide-y divide-slate-200 text-slate-900">
                 {admins.map((a) => (
                   <tr key={a._id}>
                     <td className="px-2 py-2">{a.username}</td>
@@ -378,14 +378,14 @@ export default function MasterDashboardPage() {
                         {a.status === "pending" && (
                           <button
                             onClick={() => approveAdmin(a._id)}
-                            className="rounded-lg bg-emerald-500 px-2 py-1 text-xs font-semibold text-emerald-950 hover:bg-emerald-400"
+                            className="rounded-lg bg-emerald-600 px-2 py-1 text-xs font-semibold text-white hover:bg-emerald-500"
                           >
                             Approve
                           </button>
                         )}
                         <button
                           onClick={() => deleteAdmin(a._id)}
-                          className="rounded-lg border border-red-600 px-2 py-1 text-xs text-red-200 hover:bg-red-800/50"
+                          className="rounded-lg border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
                         >
                           Delete
                         </button>
@@ -395,7 +395,7 @@ export default function MasterDashboardPage() {
                 ))}
                 {admins.length === 0 && (
                   <tr>
-                    <td className="px-2 py-3 text-slate-400" colSpan={4}>
+                    <td className="px-2 py-3 text-slate-500" colSpan={4}>
                       No admins found.
                     </td>
                   </tr>
@@ -405,11 +405,11 @@ export default function MasterDashboardPage() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
-          <div className="text-sm text-slate-400">Users</div>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-sm text-slate-600">Users</div>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="text-slate-400">
+              <thead className="text-slate-500">
                 <tr>
                   <th className="px-2 py-2 text-left">Username</th>
                   <th className="px-2 py-2 text-left">Admin</th>
@@ -418,7 +418,7 @@ export default function MasterDashboardPage() {
                   <th className="px-2 py-2 text-left">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800 text-slate-100">
+              <tbody className="divide-y divide-slate-200 text-slate-900">
                 {users.map((u) => (
                   <tr key={u._id}>
                     <td className="px-2 py-2">{u.username}</td>
@@ -428,7 +428,7 @@ export default function MasterDashboardPage() {
                     <td className="px-2 py-2">
                       <button
                         onClick={() => deleteUser(u._id)}
-                        className="rounded-lg border border-red-600 px-2 py-1 text-xs text-red-200 hover:bg-red-800/50"
+                        className="rounded-lg border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
                       >
                         Delete
                       </button>
@@ -437,7 +437,7 @@ export default function MasterDashboardPage() {
                 ))}
                 {users.length === 0 && (
                   <tr>
-                    <td className="px-2 py-3 text-slate-400" colSpan={5}>
+                    <td className="px-2 py-3 text-slate-500" colSpan={5}>
                       No users found.
                     </td>
                   </tr>
@@ -453,9 +453,9 @@ export default function MasterDashboardPage() {
 
 function StatCard({ title, value }: { title: string; value: number }) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 shadow-xl shadow-slate-950/40">
-      <div className="text-sm text-slate-400">{title}</div>
-      <div className="mt-2 text-2xl font-semibold text-slate-50">{value}</div>
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="text-sm text-slate-500">{title}</div>
+      <div className="mt-2 text-4xl font-semibold text-slate-900">{value}</div>
     </div>
   );
 }

@@ -249,8 +249,8 @@ export default function UserDashboardPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 px-4 py-8 text-slate-50">
-      <div className="mx-auto flex max-w-5xl flex-col gap-6">
+    <div className="min-h-screen bg-white px-4 py-8 text-slate-900">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6">
         <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm uppercase tracking-[0.2em] text-cyan-300">
@@ -295,7 +295,7 @@ export default function UserDashboardPage() {
           </div>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid w-full max-w-5xl mx-auto gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <StatusCard title="Motor Status" value={statusLabel} status={effectiveStatus} />
           <InfoCard title="Remaining Minutes" value={`${effectiveRemaining}m`} />
           <InfoCard title="Available Minutes" value={`${availableMinutes}m`} />
@@ -343,33 +343,29 @@ export default function UserDashboardPage() {
               />
             </>
           )}
-          <InfoCard
-            title="Request Minutes"
-            value={
-              requestMessage
-                ? requestMessage
-                : requestLoading
-                  ? "Sending..."
-                  : `${requestMinutes}m`
-            }
-            subtle
-          />
+          {pendingRequest && (
+            <InfoCard
+              title="Request Minutes"
+              value={`Pending approval: ${pendingRequest.minutes}m`}
+              subtle
+            />
+          )}
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+        <div className="flex flex-col items-center gap-4">
           <div
-            className={`rounded-2xl border border-slate-800 bg-slate-950/60 p-6 shadow-xl shadow-slate-950/40 ${
+            className={`w-full max-w-4xl rounded-2xl border border-gray-200 bg-white p-6 shadow-md ${
               loadShedding || suspendedReason ? "opacity-60 pointer-events-none" : ""
             }`}
           >
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm text-slate-400">Set Minutes</div>
-                <div className="text-lg font-semibold text-slate-100">
+                <div className="text-sm text-slate-500">Set Minutes</div>
+                <div className="text-lg font-semibold text-slate-900">
                   Configure your run time
                 </div>
               </div>
-              <span className="rounded-full border border-slate-800 bg-slate-900 px-3 py-1 text-xs text-slate-300">
+              <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-slate-600">
                 Wallet: {availableMinutes}m
               </span>
             </div>
@@ -378,14 +374,14 @@ export default function UserDashboardPage() {
               <input
                 type="number"
                 min={1}
-                className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-base text-slate-50 outline-none ring-0 focus:border-cyan-400"
+                className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-base text-slate-900 outline-none ring-0 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
                 value={setMinutes}
                 onChange={(e) => setSetMinutes(Math.max(1, Number(e.target.value)))}
               />
               <div className="flex w-full flex-1 items-center gap-3">
                 <button
                   onClick={handleStart}
-                  className="flex-1 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-900/30 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex-1 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-200 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={
                     effectiveStatus === "RUNNING" ||
                     ((queuePositionLive ?? queuePosition) ?? 0) > 0 ||
@@ -400,7 +396,7 @@ export default function UserDashboardPage() {
                 </button>
                 <button
                   onClick={handleStop}
-                  className="flex-1 rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-100 shadow-md shadow-slate-950/40 transition hover:border-slate-500 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={stopLoading || !idsValid || suspendedReason !== null}
                 >
                   {stopLoading ? "Stopping..." : "Stop Motor"}
@@ -450,26 +446,26 @@ export default function UserDashboardPage() {
                 </div>
               )}
 
+          </div>
         </div>
-      </div>
 
-      <div className="flex w-full max-w-6xl items-center justify-end">
-        <button
-          onClick={() => setShowRequest((s) => !s)}
-          className="rounded-full bg-[#2563eb] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#1e4fbf]"
-        >
-          {showRequest ? "Hide Buy Minutes" : "Buy Minutes"}
+        <div className="flex w-full max-w-5xl items-center justify-center mx-auto">
+          <button
+            onClick={() => setShowRequest((s) => !s)}
+            className="rounded-full bg-[#2563eb] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#1e4fbf]"
+          >
+            {showRequest ? "Hide Buy Minutes" : "Buy Minutes"}
         </button>
       </div>
 
       {showRequest && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-6 shadow-xl shadow-slate-950/40">
-          <div className="text-sm text-slate-300">Request more minutes</div>
+        <div className="w-full max-w-4xl rounded-2xl border border-gray-200 bg-white p-6 shadow-md mx-auto">
+          <div className="text-sm text-slate-600">Request more minutes</div>
           <div className="mt-2 flex gap-3 sm:flex-row flex-col">
             <input
               type="number"
               min={1}
-              className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+              className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-slate-900"
               value={requestMinutes}
               onChange={(e) => setRequestMinutes(Math.max(1, Number(e.target.value)))}
             />
@@ -507,18 +503,18 @@ export default function UserDashboardPage() {
                 requestLoading ||
                 requestMinutes <= 0 ||
                 suspendedReason !== null ||
-                lowBalance ||
                 !!pendingRequest
               }
-              className="rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-900 shadow hover:bg-cyan-300 disabled:opacity-60"
+              className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-cyan-400 disabled:opacity-60"
             >
               {requestLoading ? "Sending..." : "Send Request"}
             </button>
           </div>
-          {requestError && <p className="mt-2 text-xs text-red-300">{requestError}</p>}
-          {requestMessage && <p className="mt-2 text-xs text-emerald-300">{requestMessage}</p>}
+          {requestError && <p className="mt-2 text-xs text-red-600">{requestError}</p>}
+          {requestMessage && <p className="mt-2 text-xs text-emerald-600">{requestMessage}</p>}
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -531,8 +527,8 @@ type StatusCardProps = {
 
 function StatusCard({ title, value, status }: StatusCardProps) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 shadow-xl shadow-slate-950/40">
-      <div className="text-sm text-slate-400">{title}</div>
+    <div className={cardClass}>
+      <div className="text-sm text-slate-500">{title}</div>
       <div className="mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold">
         <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusColors[status]}`}>
           {value}
@@ -550,11 +546,11 @@ type InfoCardProps = {
 
 function InfoCard({ title, value, subtle }: InfoCardProps) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 shadow-xl shadow-slate-950/40">
-      <div className="text-sm text-slate-400">{title}</div>
+    <div className={cardClass}>
+      <div className="text-sm text-slate-500">{title}</div>
       <div
         className={`mt-3 text-xl font-semibold ${
-          subtle ? "text-slate-200" : "text-slate-50"
+          subtle ? "text-slate-500" : "text-slate-900"
         }`}
       >
         {value}

@@ -4,7 +4,7 @@ export interface AdminDocument extends mongoose.Document {
   username: string;
   password: string;
   status: 'pending' | 'active' | 'suspended';
-  createdBy: Types.ObjectId;
+  createdBy?: Types.ObjectId;
   loadShedding: boolean;
   createdAt: Date;
   suspendReason?: string;
@@ -31,7 +31,7 @@ const adminSchema = new Schema<AdminDocument>(
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: 'MasterAdmin',
-      required: true,
+      required: false,
     },
     loadShedding: {
       type: Boolean,

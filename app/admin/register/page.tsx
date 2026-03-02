@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useSession, signIn } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
 export default function AdminRegisterPage() {
-  const { data: session, status } = useSession();
+  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -40,6 +40,7 @@ export default function AdminRegisterPage() {
       setSuccess("Admin created. Waiting for approval.");
       setUsername("");
       setPassword("");
+      router.push("/admin/login");
     } catch (err: any) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -58,20 +59,6 @@ export default function AdminRegisterPage() {
           <p className="text-sm text-slate-400">Create an admin for approval.</p>
         </div>
 
-        {status !== "authenticated" || session?.user?.role !== "master" ? (
-          <div className="space-y-3 text-sm text-slate-200">
-            <p>Only a Master Admin can create admins. Please sign in.</p>
-            <button
-              onClick={() => signIn(undefined, { callbackUrl: "/admin/register" })}
-              className="w-full rounded-xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-900 shadow-lg shadow-cyan-900/30 transition hover:bg-cyan-300"
-            >
-              Sign in as Master Admin
-            </button>
-            <div className="text-xs text-slate-400">
-              Need a Master account? seed one in the database with role "master".
-            </div>
-          </div>
-        ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="text-sm text-slate-300">Username</label>
@@ -112,7 +99,6 @@ export default function AdminRegisterPage() {
             {loading ? "Creating..." : "Create Admin"}
           </button>
         </form>
-        )}
 
         <div className="mt-6 text-center text-xs text-slate-400">
           Need user signup?{" "}
