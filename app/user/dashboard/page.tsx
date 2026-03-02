@@ -417,21 +417,6 @@ export default function UserDashboardPage() {
                 </div>
               )}
 
-            <div className="mt-6 grid gap-4 sm:grid-cols-2">
-              <InfoCard title="Last Set Minutes" value={`${setMinutes}m`} subtle />
-              {hasQueue && (
-                <InfoCard
-                  title="Queue Awareness"
-                  value={
-                    queueValue === 0
-                      ? "You are running"
-                      : `You are #${queueValue}`
-                  }
-                  subtle
-                />
-              )}
-            </div>
-
           </div>
         </div>
 
