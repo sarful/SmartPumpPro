@@ -19,6 +19,8 @@ export default function MasterDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copiedAdminId, setCopiedAdminId] = useState<string | null>(null);
+  const [manualAdminApproval, setManualAdminApproval] = useState(true);
+  const [savingApprovalMode, setSavingApprovalMode] = useState(false);
 
   const [newAdmin, setNewAdmin] = useState({ username: "", password: "", status: "pending" });
   const [newUser, setNewUser] = useState({ username: "", password: "", adminId: "" });
@@ -43,10 +45,37 @@ export default function MasterDashboardPage() {
       setOverview(o);
       setAllAdmins(o.admins || []);
       setAllUsers(o.users || []);
+      const settingsRes = await fetch("/api/master/settings");
+      const settingsJson = await settingsRes.json();
+      if (settingsRes.ok) {
+        setManualAdminApproval(Boolean(settingsJson.manualAdminApproval));
+      }
     } catch (err: any) {
       setError(err instanceof Error ? err.message : "Failed to load data");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const updateApprovalMode = async (value: boolean) => {
+    setSavingApprovalMode(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/master/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ manualAdminApproval: value }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error || "Failed to update approval mode");
+        return;
+      }
+      setManualAdminApproval(Boolean(json.manualAdminApproval));
+    } catch (err: any) {
+      setError(err instanceof Error ? err.message : "Failed to update approval mode");
+    } finally {
+      setSavingApprovalMode(false);
     }
   };
 
@@ -216,6 +245,30 @@ export default function MasterDashboardPage() {
             <StatCard title="Waiting" value={overview.waiting} />
           </div>
         )}
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm text-slate-600">Admin Approval Control</div>
+              <div className="text-xs text-slate-500">
+                ON = new admins stay pending and need master approval. OFF = auto approve new admins.
+              </div>
+            </div>
+            <button
+              onClick={() => updateApprovalMode(!manualAdminApproval)}
+              disabled={savingApprovalMode}
+              className={`rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 ${
+                manualAdminApproval ? "bg-amber-600 hover:bg-amber-500" : "bg-emerald-600 hover:bg-emerald-500"
+              }`}
+            >
+              {savingApprovalMode
+                ? "Saving..."
+                : manualAdminApproval
+                  ? "ON (Manual approval)"
+                  : "OFF (Auto approval)"}
+            </button>
+          </div>
+        </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="text-sm text-slate-600">All Admins</div>

@@ -37,7 +37,7 @@ export default function AdminRegisterPage() {
       if (!res.ok) {
         throw new Error(data.error || "Registration failed");
       }
-      setSuccess("Admin created. Waiting for approval.");
+      setSuccess(data.message || "Admin created successfully.");
       setUsername("");
       setPassword("");
       router.push("/admin/login");
@@ -104,6 +104,11 @@ export default function AdminRegisterPage() {
           Need user signup?{" "}
           <Link href="/user/register" className="text-cyan-300 hover:text-cyan-200">
             Go to User Registration
+          </Link>
+        </div>
+        <div className="mt-3 text-center text-xs">
+          <Link href="/" className="text-cyan-300 hover:text-cyan-200">
+            Go to Home
           </Link>
         </div>
       </div>

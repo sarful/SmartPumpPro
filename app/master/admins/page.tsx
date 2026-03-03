@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSession, signIn, signOut } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
 type PendingAdmin = { _id: string; username: string; status: string };
@@ -69,7 +69,7 @@ export default function MasterAdminsPage() {
         <div className="mx-auto max-w-lg rounded-xl border border-slate-800 bg-slate-900/70 p-6 text-center">
           <p className="text-lg font-semibold">Master admin access required.</p>
           <button
-            onClick={() => signIn()}
+            onClick={() => router.push("/master/login")}
             className="mt-4 rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-900"
           >
             Sign In

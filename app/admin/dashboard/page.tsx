@@ -48,8 +48,370 @@ export default function AdminDashboardPage() {
   const [suspendError, setSuspendError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [stopResetLoadingUserId, setStopResetLoadingUserId] = useState<string | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [espCodeType, setEspCodeType] = useState<"arduino" | "micropython" | "esp8266">("arduino");
 
   const isAdmin = session?.user?.role === "admin";
+  const adminId = session?.user?.adminId ?? "";
+
+  const esp32ArduinoCode = `#include <WiFiManager.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+
+#define MOTOR_PIN 23
+#define LOAD_PIN 34
+
+#define POLL_INTERVAL_MS 5000
+#define HTTP_TIMEOUT_MS 6000
+
+const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
+const char* API_HOST = "https://pms-two-kappa.vercel.app";
+
+unsigned long lastPoll = 0;
+
+void setMotor(bool on) {
+  digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
+  Serial.printf("[LED] %s\\n", on ? "ON" : "OFF");
+}
+
+void ensureWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  WiFi.reconnect();
+
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 8000) {
+    delay(200);
+    Serial.print(".");
+  }
+  Serial.println();
+}
+
+void pollServer() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  bool localLS = (digitalRead(LOAD_PIN) == HIGH);
+
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  HTTPClient http;
+  String url = String(API_HOST) + "/api/esp32/poll?adminId=" + ADMIN_ID + "&ls=" + (localLS ? "1" : "0");
+
+  http.setTimeout(HTTP_TIMEOUT_MS);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+
+  if (!http.begin(client, url)) {
+    Serial.println("[HTTP] begin failed");
+    return;
+  }
+
+  int code = http.GET();
+
+  if (code != HTTP_CODE_OK) {
+    String location = http.header("Location");
+    Serial.printf("[HTTP] code=%d", code);
+    if (location.length() > 0) {
+      Serial.printf(" redirect=%s", location.c_str());
+    }
+    Serial.println();
+    http.end();
+    return;
+  }
+
+  String payload = http.getString();
+  http.end();
+
+  StaticJsonDocument<512> doc;
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    Serial.println("[JSON] parse error");
+    return;
+  }
+
+  const char* status = doc["motorStatus"] | "OFF";
+  bool loadShedding = doc["loadShedding"] | false;
+  const char* adminName = doc["adminName"] | "unknown";
+
+  Serial.printf("[POLL] admin=%s status=%s ls=%d localLS=%d\\n",
+                adminName, status, loadShedding, localLS);
+
+  bool turnOn = (strcmp(status, "RUNNING") == 0) && !loadShedding && !localLS;
+  setMotor(turnOn);
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(MOTOR_PIN, OUTPUT);
+  digitalWrite(MOTOR_PIN, LOW);
+
+  pinMode(LOAD_PIN, INPUT_PULLUP);
+
+  WiFiManager wm;
+  wm.setConfigPortalTimeout(180);
+  if (!wm.autoConnect("SmartPump-Setup")) {
+    delay(2000);
+    ESP.restart();
+  }
+
+  Serial.print("WiFi Connected. IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+void loop() {
+  ensureWiFi();
+  unsigned long now = millis();
+
+  if (now - lastPoll >= POLL_INTERVAL_MS) {
+    lastPoll = now;
+    pollServer();
+  }
+
+  delay(10);
+}`;
+
+  const esp32MicroPythonCode = `import network
+import time
+import machine
+import urequests
+import ujson
+
+# ========== CONFIG ==========
+WIFI_SSID = "YOUR_WIFI_NAME"
+WIFI_PASS = "YOUR_WIFI_PASSWORD"
+
+MOTOR_PIN = 23
+LOAD_PIN = 34
+
+POLL_INTERVAL_MS = 5000
+HTTP_TIMEOUT_MS = 6  # seconds
+
+ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}"
+API_HOST = "https://pms-two-kappa.vercel.app"
+
+# ========== SETUP ==========
+motor = machine.Pin(MOTOR_PIN, machine.Pin.OUT)
+load_pin = machine.Pin(LOAD_PIN, machine.Pin.IN, machine.Pin.PULL_UP)
+
+last_poll = 0
+
+
+# ========== FUNCTIONS ==========
+
+def set_motor(on):
+    motor.value(1 if on else 0)
+    print("[LED]", "ON" if on else "OFF")
+
+
+def connect_wifi():
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+
+    if not wlan.isconnected():
+        print("Connecting to WiFi...")
+        wlan.connect(WIFI_SSID, WIFI_PASS)
+
+        timeout = 8
+        start = time.time()
+
+        while not wlan.isconnected():
+            if time.time() - start > timeout:
+                print("WiFi Failed. Restarting...")
+                machine.reset()
+            time.sleep(0.2)
+
+    print("WiFi Connected:", wlan.ifconfig())
+    return wlan
+
+
+def ensure_wifi(wlan):
+    if not wlan.isconnected():
+        wlan.disconnect()
+        wlan.connect(WIFI_SSID, WIFI_PASS)
+
+
+def poll_server(wlan):
+    if not wlan.isconnected():
+        return
+
+    local_ls = (load_pin.value() == 1)
+
+    url = "{}/api/esp32/poll?adminId={}&ls={}".format(
+        API_HOST,
+        ADMIN_ID,
+        "1" if local_ls else "0"
+    )
+
+    try:
+        response = urequests.get(url, timeout=HTTP_TIMEOUT_MS)
+
+        if response.status_code != 200:
+            print("[HTTP] code=", response.status_code)
+            response.close()
+            return
+
+        payload = response.text
+        response.close()
+
+        doc = ujson.loads(payload)
+
+        status = doc.get("motorStatus", "OFF")
+        load_shedding = doc.get("loadShedding", False)
+        admin_name = doc.get("adminName", "unknown")
+
+        print("[POLL] admin={} status={} ls={} localLS={}".format(
+            admin_name,
+            status,
+            load_shedding,
+            local_ls
+        ))
+
+        turn_on = (status == "RUNNING") and (not load_shedding) and (not local_ls)
+        set_motor(turn_on)
+
+    except Exception as e:
+        print("[ERROR]", e)
+
+
+# ========== MAIN ==========
+wlan = connect_wifi()
+
+while True:
+    ensure_wifi(wlan)
+
+    now = time.ticks_ms()
+
+    if time.ticks_diff(now, last_poll) >= POLL_INTERVAL_MS:
+        last_poll = now
+        poll_server(wlan)
+
+    time.sleep_ms(10)`;
+
+  const esp8266Code = `#include <ESP8266WiFi.h>
+#include <WiFiManager.h>
+#include <WiFiClientSecureBearSSL.h>
+#include <ESP8266HTTPClient.h>
+#include <ArduinoJson.h>
+
+#define MOTOR_PIN 23
+#define LOAD_PIN 34
+
+#define POLL_INTERVAL_MS 5000
+#define HTTP_TIMEOUT_MS 6000
+
+const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
+const char* API_HOST = "https://pms-two-kappa.vercel.app";
+
+unsigned long lastPoll = 0;
+
+void setMotor(bool on) {
+  digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
+  Serial.printf("[LED] %s\\n", on ? "ON" : "OFF");
+}
+
+void ensureWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+
+  WiFi.reconnect();
+
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 8000) {
+    delay(200);
+    Serial.print(".");
+  }
+  Serial.println();
+}
+
+void pollServer() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  bool localLS = (digitalRead(LOAD_PIN) == HIGH);
+
+  std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
+  client->setInsecure();
+
+  HTTPClient http;
+
+  String url = String(API_HOST) + "/api/esp32/poll?adminId=" + ADMIN_ID +
+               "&ls=" + (localLS ? "1" : "0");
+
+  http.setTimeout(HTTP_TIMEOUT_MS);
+
+  if (!http.begin(*client, url)) {
+    Serial.println("[HTTP] begin failed");
+    return;
+  }
+
+  int code = http.GET();
+
+  if (code != HTTP_CODE_OK) {
+    Serial.printf("[HTTP] code=%d\\n", code);
+    http.end();
+    return;
+  }
+
+  String payload = http.getString();
+  http.end();
+
+  StaticJsonDocument<512> doc;
+  DeserializationError err = deserializeJson(doc, payload);
+
+  if (err) {
+    Serial.println("[JSON] parse error");
+    return;
+  }
+
+  const char* status = doc["motorStatus"] | "OFF";
+  bool loadShedding = doc["loadShedding"] | false;
+  const char* adminName = doc["adminName"] | "unknown";
+
+  Serial.printf("[POLL] admin=%s status=%s ls=%d localLS=%d\\n",
+                adminName, status, loadShedding, localLS);
+
+  bool turnOn = (strcmp(status, "RUNNING") == 0) && !loadShedding && !localLS;
+
+  setMotor(turnOn);
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(MOTOR_PIN, OUTPUT);
+  digitalWrite(MOTOR_PIN, LOW);
+
+  pinMode(LOAD_PIN, INPUT_PULLUP);
+
+  WiFiManager wm;
+  wm.setConfigPortalTimeout(180);
+
+  if (!wm.autoConnect("SmartPump-Setup")) {
+    delay(2000);
+    ESP.restart();
+  }
+
+  Serial.print("WiFi Connected. IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+void loop() {
+  ensureWiFi();
+
+  unsigned long now = millis();
+  if (now - lastPoll >= POLL_INTERVAL_MS) {
+    lastPoll = now;
+    pollServer();
+  }
+
+  delay(10);
+}`;
+
+  const esp32Code =
+    espCodeType === "arduino"
+      ? esp32ArduinoCode
+      : espCodeType === "micropython"
+        ? esp32MicroPythonCode
+        : esp8266Code;
 
   const loadData = async () => {
     if (!isAdmin) return;
@@ -225,6 +587,16 @@ export default function AdminDashboardPage() {
     }
     setStatusMessage("User reactivated");
     await loadData();
+  };
+
+  const copyEsp32Code = async () => {
+    try {
+      await navigator.clipboard.writeText(esp32Code);
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 1500);
+    } catch {
+      setError("Failed to copy ESP32 code");
+    }
   };
 
   if (status === "loading") {
@@ -492,6 +864,39 @@ export default function AdminDashboardPage() {
                   );
                 })}
               </div>
+            </section>
+
+            <section className="mx-auto w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm text-slate-400">Motor Control Program</div>
+                  <div className="text-xs text-slate-500">
+                    Admin-based config with your ADMIN_ID
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={espCodeType}
+                    onChange={(e) =>
+                      setEspCodeType(e.target.value as "arduino" | "micropython" | "esp8266")
+                    }
+                    className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+                  >
+                    <option value="arduino">ESP32 Arduino code</option>
+                    <option value="micropython">ESP32 MicroPython code</option>
+                    <option value="esp8266">ESP8266 Arduino code</option>
+                  </select>
+                  <button
+                    onClick={copyEsp32Code}
+                    className="rounded-lg border border-cyan-500 px-3 py-1 text-xs text-cyan-200 hover:bg-cyan-800/40"
+                  >
+                    {codeCopied ? "Copied" : "Copy Code"}
+                  </button>
+                </div>
+              </div>
+              <pre className="mt-3 overflow-x-auto rounded-xl border border-slate-700 bg-black p-3 text-xs text-green-300">
+{esp32Code}
+              </pre>
             </section>
           </>
         )}

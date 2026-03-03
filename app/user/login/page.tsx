@@ -84,6 +84,14 @@ export default function UserLoginPage() {
             Register
           </Link>
         </div>
+        <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
+          <Link href="/user/forgot-password" className="text-cyan-300 hover:text-cyan-200">
+            Forgot password?
+          </Link>
+          <Link href="/" className="text-cyan-300 hover:text-cyan-200">
+            Go to Home
+          </Link>
+        </div>
       </div>
     </div>
   );

@@ -14,7 +14,7 @@ export default function Home() {
 
         <div className="mt-8 grid gap-3 sm:grid-cols-2">
           <Link
-            href="/master/admins"
+            href="/master/login"
             className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium hover:bg-slate-50"
           >
             Master Admin Login

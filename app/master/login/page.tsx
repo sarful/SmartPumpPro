@@ -5,7 +5,7 @@ import { getSession, signIn } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-export default function AdminLoginPage() {
+export default function MasterLoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -15,10 +15,12 @@ export default function AdminLoginPage() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
+
     if (!username || !password) {
       setError("Username and password are required");
       return;
     }
+
     setLoading(true);
     const res = await signIn("credentials", {
       redirect: false,
@@ -26,32 +28,28 @@ export default function AdminLoginPage() {
       password,
     });
     setLoading(false);
+
     if (res?.error) {
-      setError(res.error);
-    } else {
-      const session = await getSession();
-      const role = session?.user?.role;
-      if (role === "master") {
-        router.push("/master/dashboard");
-      } else if (role === "admin") {
-        router.push("/admin/dashboard");
-      } else if (role === "user") {
-        router.push("/user/dashboard");
-      } else {
-        router.push("/admin/dashboard");
-      }
+      setError("Invalid credentials");
+      return;
     }
+
+    const session = await getSession();
+    if (session?.user?.role !== "master") {
+      setError("This account is not a master admin");
+      return;
+    }
+
+    router.push("/master/dashboard");
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-50 px-4 py-10">
+    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 px-4 py-10 text-slate-50">
       <div className="mx-auto max-w-md rounded-2xl border border-slate-800 bg-slate-950/70 p-8 shadow-2xl shadow-slate-950/40">
         <div className="mb-6">
-          <p className="text-sm uppercase tracking-[0.2em] text-cyan-300">
-            SmartPump Pro
-          </p>
-          <h1 className="mt-2 text-2xl font-semibold">Admin Login</h1>
-          <p className="text-sm text-slate-400">Sign in to manage approvals and pumps.</p>
+          <p className="text-sm uppercase tracking-[0.2em] text-cyan-300">SmartPump Pro</p>
+          <h1 className="mt-2 text-2xl font-semibold">Master Admin Login</h1>
+          <p className="text-sm text-slate-400">Sign in to manage the full platform.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -61,7 +59,7 @@ export default function AdminLoginPage() {
               className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="admin name"
+              placeholder="master username"
             />
           </div>
           <div>
@@ -71,7 +69,7 @@ export default function AdminLoginPage() {
               className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••"
+              placeholder="******"
             />
           </div>
 
@@ -90,14 +88,8 @@ export default function AdminLoginPage() {
           </button>
         </form>
 
-        <div className="mt-6 text-center text-xs text-slate-400">
-          Need an account?{" "}
-          <Link href="/admin/register" className="text-cyan-300 hover:text-cyan-200">
-            Register
-          </Link>
-        </div>
-        <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
-          <Link href="/admin/forgot-password" className="text-cyan-300 hover:text-cyan-200">
+        <div className="mt-6 flex items-center justify-between text-xs text-slate-400">
+          <Link href="/master/forgot-password" className="text-cyan-300 hover:text-cyan-200">
             Forgot password?
           </Link>
           <Link href="/" className="text-cyan-300 hover:text-cyan-200">

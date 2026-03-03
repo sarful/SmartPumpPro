@@ -157,6 +157,11 @@ export default function UserRegisterPage() {
             Go to Admin Registration
           </Link>
         </div>
+        <div className="mt-3 text-center text-xs">
+          <Link href="/" className="text-cyan-300 hover:text-cyan-200">
+            Go to Home
+          </Link>
+        </div>
       </div>
     </div>
   );

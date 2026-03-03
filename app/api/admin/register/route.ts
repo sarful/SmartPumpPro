@@ -2,6 +2,7 @@ import { NextResponse, NextRequest } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import Admin from '@/models/Admin';
 import MasterAdmin from '@/models/MasterAdmin';
+import SystemState from '@/models/SystemState';
 import { hash } from 'bcryptjs';
 import { auth } from '@/lib/auth';
 
@@ -40,16 +41,23 @@ export async function POST(req: NextRequest) {
 
     const hashed = await hash(password, 10);
 
+    const settings = await SystemState.findOneAndUpdate(
+      { key: "global" },
+      { $setOnInsert: { key: "global", manualAdminApproval: true } },
+      { upsert: true, new: true },
+    ).lean();
+    const manualAdminApproval = settings?.manualAdminApproval ?? true;
+
     const adminPayload: {
       username: string;
       password: string;
-      status: 'pending';
+      status: 'pending' | 'active';
       loadShedding: boolean;
       createdBy?: string;
     } = {
       username: username.trim(),
       password: hashed,
-      status: 'pending',
+      status: manualAdminApproval ? 'pending' : 'active',
       loadShedding: false,
     };
 
@@ -68,7 +76,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: 'Admin created. Waiting for approval.',
+      message: manualAdminApproval
+        ? 'Admin created. Waiting for approval.'
+        : 'Admin created and auto-approved.',
     });
   } catch (error: any) {
     console.error('Admin register error:', error);
