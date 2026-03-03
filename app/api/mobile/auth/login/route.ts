@@ -11,10 +11,12 @@ import {
   getRefreshExpiryDate,
   hashRefreshToken,
 } from "@/lib/mobile-auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 type Body = {
   username?: string;
   password?: string;
+  deviceId?: string;
 };
 
 async function verifyPassword(stored: string | undefined | null, provided: string) {
@@ -31,6 +33,15 @@ async function verifyPassword(stored: string | undefined | null, provided: strin
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const limiter = rateLimit(`mobile-login:${ip}`, 10, 60_000);
+    if (!limiter.allowed) {
+      return NextResponse.json(
+        { error: "Too many login attempts. Try again later." },
+        { status: 429 },
+      );
+    }
+
     let body: Body;
     try {
       body = await req.json();
@@ -40,21 +51,55 @@ export async function POST(req: NextRequest) {
 
     const username = body.username?.trim();
     const password = body.password ?? "";
+    const deviceId = body.deviceId?.trim();
+    const userAgent = req.headers.get("user-agent") ?? "";
     if (!username || !password) {
       return NextResponse.json({ error: "username and password are required" }, { status: 400 });
     }
 
     await connectDB();
+    const maxSessions = Number(process.env.MOBILE_MAX_SESSIONS || "5");
+
+    const createSession = async (sessionData: {
+      userId: string;
+      role: "master" | "admin" | "user";
+      username: string;
+      adminId?: string;
+    }) => {
+      // Limit concurrent active sessions per user for safety.
+      const activeSessions = await MobileSession.find({
+        userId: sessionData.userId,
+        revokedAt: null,
+        expiresAt: { $gt: new Date() },
+      })
+        .sort({ createdAt: 1 })
+        .lean();
+
+      if (activeSessions.length >= maxSessions) {
+        const overflow = activeSessions.length - maxSessions + 1;
+        const toRevoke = activeSessions.slice(0, overflow).map((s) => s._id);
+        await MobileSession.updateMany({ _id: { $in: toRevoke } }, { $set: { revokedAt: new Date() } });
+      }
+
+      const refreshToken = createRefreshToken();
+      await MobileSession.create({
+        ...sessionData,
+        deviceId,
+        userAgent,
+        ip,
+        lastUsedAt: new Date(),
+        refreshTokenHash: hashRefreshToken(refreshToken),
+        expiresAt: getRefreshExpiryDate(),
+      });
+      return refreshToken;
+    };
 
     const master = await MasterAdmin.findOne({ username }).lean();
     if (master && (await verifyPassword(master.password, password))) {
-      const refreshToken = createRefreshToken();
-      await MobileSession.create({
+      const refreshToken = await createSession({
         userId: master._id.toString(),
         role: "master",
         username: master.username,
-        refreshTokenHash: hashRefreshToken(refreshToken),
-        expiresAt: getRefreshExpiryDate(),
       });
 
       return NextResponse.json({
@@ -70,14 +115,11 @@ export async function POST(req: NextRequest) {
 
     const admin = await Admin.findOne({ username, status: "active" }).lean();
     if (admin && (await verifyPassword(admin.password, password))) {
-      const refreshToken = createRefreshToken();
-      await MobileSession.create({
+      const refreshToken = await createSession({
         userId: admin._id.toString(),
         role: "admin",
         username: admin.username,
         adminId: admin._id.toString(),
-        refreshTokenHash: hashRefreshToken(refreshToken),
-        expiresAt: getRefreshExpiryDate(),
       });
 
       return NextResponse.json({
@@ -100,14 +142,11 @@ export async function POST(req: NextRequest) {
     const user = await User.findOne({ username, status: { $ne: "suspended" } }).lean();
     if (user && (await verifyPassword(user.password, password))) {
       const adminId = user.adminId?.toString();
-      const refreshToken = createRefreshToken();
-      await MobileSession.create({
+      const refreshToken = await createSession({
         userId: user._id.toString(),
         role: "user",
         username: user.username,
         adminId,
-        refreshTokenHash: hashRefreshToken(refreshToken),
-        expiresAt: getRefreshExpiryDate(),
       });
 
       return NextResponse.json({
