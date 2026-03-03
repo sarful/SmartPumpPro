@@ -223,7 +223,7 @@ export default function MasterDashboardPage() {
             <p className="text-sm uppercase tracking-[0.2em] text-blue-600">PumpPilot</p>
             <h1 className="text-2xl font-semibold sm:text-3xl">Master Dashboard</h1>
             <p className="text-sm text-slate-600">
-              Master Admin: {session?.user?.username || session?.user?.name || "-"}
+              Master Admin: {session?.user?.username || "-"}
             </p>
             <p className="text-sm text-slate-600">Create, approve, suspend and delete admins and users.</p>
           </div>

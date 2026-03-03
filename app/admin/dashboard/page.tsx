@@ -772,7 +772,7 @@ void loop() {
             <p className="text-sm uppercase tracking-[0.2em] text-cyan-300">PumpPilot</p>
             <h1 className="text-2xl font-semibold sm:text-3xl">Admin Dashboard</h1>
             <p className="text-sm text-slate-300">
-              Admin: {session?.user?.username || session?.user?.name || "-"}
+              Admin: {session?.user?.username || "-"}
             </p>
             <p className="text-sm text-slate-300">
               Manage users, wallet recharges, load shedding, and queue.
