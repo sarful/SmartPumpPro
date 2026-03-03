@@ -523,6 +523,7 @@ function StatusCard({ title, value, status }: StatusCardProps) {
     <div className={cardClass}>
       <div className="text-sm text-slate-500">{title}</div>
       <div className="mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold">
+        {status === "RUNNING" ? <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> : null}
         <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusColors[status]}`}>{value}</span>
       </div>
     </div>

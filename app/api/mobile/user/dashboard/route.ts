@@ -19,15 +19,31 @@ async function estimateWait(adminId: string, userId: string): Promise<number | n
   if (!entry) return null;
   if (entry.status === "RUNNING") return 0;
 
-  const ahead = await Queue.find({
+  const runningQueue = await Queue.findOne({
     adminId,
-    status: { $in: ["RUNNING", "WAITING"] },
+    status: "RUNNING",
+  })
+    .select({ userId: 1, requestedMinutes: 1 })
+    .lean();
+
+  let wait = 0;
+  if (runningQueue?.userId) {
+    const runningUser = await User.findById(runningQueue.userId)
+      .select({ motorRunningTime: 1 })
+      .lean();
+    wait += runningUser?.motorRunningTime ?? runningQueue.requestedMinutes ?? 0;
+  }
+
+  const waitingAhead = await Queue.find({
+    adminId,
+    status: "WAITING",
     position: { $lt: entry.position },
   })
     .select({ requestedMinutes: 1 })
     .lean();
 
-  return ahead.reduce((sum, item) => sum + (item.requestedMinutes ?? 0), 0);
+  wait += waitingAhead.reduce((sum, item) => sum + (item.requestedMinutes ?? 0), 0);
+  return wait;
 }
 
 export async function GET(req: NextRequest) {

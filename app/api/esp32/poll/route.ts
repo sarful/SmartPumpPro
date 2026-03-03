@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import User from '@/models/User';
 import Admin from '@/models/Admin';
+import Queue from '@/models/Queue';
 import { getQueuePosition } from '@/lib/queue-engine';
 import { tickRunningMotors } from '@/lib/timer-engine';
 import { activateLoadShedding, clearLoadShedding } from '@/lib/loadshedding-engine';
@@ -76,13 +77,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'User not found after state update' }, { status: 404 });
     }
 
+    const runningUserDoc = await User.findOne({
+      adminId: freshUser.adminId,
+      motorStatus: 'RUNNING',
+    })
+      .select({ username: 1 })
+      .lean();
+
     return NextResponse.json({
       motorStatus: freshUser.motorStatus,
       remainingMinutes: freshUser.motorRunningTime ?? 0,
       loadShedding: admin?.loadShedding ?? false,
       adminName: admin?.username ?? null,
       queuePosition: await getQueuePosition(freshUser.adminId.toString(), freshUser._id.toString()),
-      runningUser: freshUser.motorStatus === 'RUNNING' ? freshUser.username : undefined,
+      runningUser: runningUserDoc?.username ?? null,
       estimatedWait: await estimateWait(freshUser.adminId.toString(), freshUser._id.toString()),
     });
   } catch (error) {
@@ -92,11 +100,36 @@ export async function GET(req: NextRequest) {
 }
 
 async function estimateWait(adminId: string, userId: string) {
-  // naive estimate: if user running, remainingMinutes; if waiting, sum of ahead RUNNING remaining
-  const running = await User.findOne({ adminId, motorStatus: 'RUNNING' })
-    .select({ motorRunningTime: 1, _id: 1 })
+  const entry = await Queue.findOne({
+    adminId,
+    userId,
+    status: { $in: ['WAITING', 'RUNNING'] },
+  })
+    .select({ position: 1, status: 1 })
     .lean();
-  if (!running) return 0;
-  if (String(running._id) === String(userId)) return running.motorRunningTime ?? 0;
-  return running.motorRunningTime ?? 0;
+  if (!entry) return 0;
+  if (entry.status === 'RUNNING') return 0;
+
+  const runningQueue = await Queue.findOne({ adminId, status: 'RUNNING' })
+    .select({ userId: 1, requestedMinutes: 1 })
+    .lean();
+
+  let wait = 0;
+  if (runningQueue?.userId) {
+    const runningUser = await User.findById(runningQueue.userId)
+      .select({ motorRunningTime: 1 })
+      .lean();
+    wait += runningUser?.motorRunningTime ?? runningQueue.requestedMinutes ?? 0;
+  }
+
+  const waitingAhead = await Queue.find({
+    adminId,
+    status: 'WAITING',
+    position: { $lt: entry.position },
+  })
+    .select({ requestedMinutes: 1 })
+    .lean();
+
+  wait += waitingAhead.reduce((sum, item) => sum + (item.requestedMinutes ?? 0), 0);
+  return wait;
 }
