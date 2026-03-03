@@ -1,5 +1,5 @@
 // ======================================
-// SmartPump Pro - Universal ESP32 Client
+// PumpPilot - Universal ESP32 Client
 // - Only adminId required (userId optional)
 // - Sends local load-shedding sensing (ls=0/1)
 // - Respects server loadShedding and motorStatus
@@ -100,11 +100,11 @@ void setup() {
   digitalWrite(MOTOR_PIN, LOW);
   pinMode(LOAD_PIN, INPUT_PULLUP);
 
-  Serial.println("\n=== SmartPump Pro (Universal) ===");
+  Serial.println("\n=== PumpPilot (Universal) ===");
 
   WiFiManager wm;
   wm.setConfigPortalTimeout(180);
-  if (!wm.autoConnect("SmartPump-Setup")) {
+  if (!wm.autoConnect("PumpPilot-Setup")) {
     Serial.println("WiFi failed, rebooting...");
     delay(3000);
     ESP.restart();

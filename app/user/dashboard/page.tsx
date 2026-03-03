@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import useRealtime from "@/hooks/useRealtime";
 
 type MotorStatus = "OFF" | "RUNNING" | "HOLD";
@@ -269,29 +270,19 @@ export default function UserDashboardPage() {
 
   return (
     <div className="min-h-screen bg-white px-4 py-8 text-slate-900">
-      <div className="mx-auto flex max-w-6xl flex-col gap-6">
-        <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mx-auto mt-2 flex max-w-6xl flex-col gap-6">
+        <header className="flex flex-col items-center gap-2 text-center">
           <div>
-            <p className="text-sm uppercase tracking-[0.2em] text-cyan-600">SmartPump Pro</p>
-            <h1 className="text-2xl font-semibold sm:text-3xl">Welcome, {userName}</h1>
+            <p className="text-sm uppercase tracking-[0.2em] text-cyan-600">PumpPilot</p>
+            <h1 className="text-2xl font-semibold sm:text-3xl">User Dashboard</h1>
             <p className="mt-1 text-sm text-slate-600">
+              User: <span className="font-semibold text-slate-900">{userName}</span>
+            </p>
+            <p className="text-sm text-slate-600">
               Admin: <span className="font-semibold text-slate-900">{adminName}</span>
             </p>
           </div>
-          <div className="flex items-center gap-2 text-sm text-slate-600">
-            <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
-            {idsValid ? "Live status ready" : "Missing Admin/User IDs"}
-            {loading ? " | syncing..." : ""}
-            {error ? " | realtime degraded" : ""}
-            {sessionStatus === "authenticated" && (
-              <button
-                onClick={() => signOut({ callbackUrl: "/user/login" })}
-                className="ml-3 rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-cyan-400 hover:text-cyan-700"
-              >
-                Logout
-              </button>
-            )}
-          </div>
+          <div />
         </header>
 
         {suspendedReason && (
@@ -505,8 +496,37 @@ export default function UserDashboardPage() {
             </div>
             {requestError && <p className="mt-2 text-xs text-red-600">{requestError}</p>}
             {requestMessage && <p className="mt-2 text-xs text-emerald-600">{requestMessage}</p>}
+
           </div>
         )}
+
+        <div className="mx-auto w-full max-w-4xl rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="text-sm font-semibold text-slate-700">Session Controls</div>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2 text-sm text-slate-600">
+              <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
+              {idsValid ? "Live status ready" : "Missing Admin/User IDs"}
+              {loading ? " | syncing..." : ""}
+              {error ? " | realtime degraded" : ""}
+            </div>
+            {sessionStatus === "authenticated" && (
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/logs"
+                  className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-cyan-400 hover:text-cyan-700"
+                >
+                  Logs
+                </Link>
+                <button
+                  onClick={() => signOut({ callbackUrl: "/user/login" })}
+                  className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-cyan-400 hover:text-cyan-700"
+                >
+                  Logout
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

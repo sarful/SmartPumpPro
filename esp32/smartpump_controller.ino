@@ -70,9 +70,9 @@ void setup() {
   pinMode(LOAD_PIN, INPUT_PULLUP);
 
   // WiFiManager portal auto-connect
-  wifiManager.setHostname("SmartPump");
+  wifiManager.setHostname("PumpPilot");
   wifiManager.setTimeout(120); // portal stays 2 minutes if needed
-  if (!wifiManager.autoConnect("SmartPump-Setup")) {
+  if (!wifiManager.autoConnect("PumpPilot-Setup")) {
     Serial.println("WiFi connect failed, rebooting...");
     delay(3000);
     ESP.restart();

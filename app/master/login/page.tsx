@@ -47,7 +47,7 @@ export default function MasterLoginPage() {
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 px-4 py-10 text-slate-50">
       <div className="mx-auto max-w-md rounded-2xl border border-slate-800 bg-slate-950/70 p-8 shadow-2xl shadow-slate-950/40">
         <div className="mb-6">
-          <p className="text-sm uppercase tracking-[0.2em] text-cyan-300">SmartPump Pro</p>
+          <p className="text-sm uppercase tracking-[0.2em] text-cyan-300">PumpPilot</p>
           <h1 className="mt-2 text-2xl font-semibold">Master Admin Login</h1>
           <p className="text-sm text-slate-400">Sign in to manage the full platform.</p>
         </div>

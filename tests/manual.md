@@ -1,4 +1,4 @@
-# SmartPump Pro Manual Test Plan
+# PumpPilot Manual Test Plan
 
 ## Prereqs
 - `.env.local` set with `MONGODB_URI` and `NEXTAUTH_SECRET`.

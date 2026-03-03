@@ -13,11 +13,17 @@ export async function GET(req: NextRequest) {
   await connectDB();
 
   // Master sees all, admin sees own admin, user sees own entries
-  const filter: any = {};
-  if (session.user.role === 'admin') filter.adminId = session.user.adminId;
-  if (session.user.role === 'user') filter.userId = session.user.id;
+  const filter: Record<string, string> = {};
+  if (session.user.role === 'admin' && session.user.adminId) {
+    filter.adminId = session.user.adminId;
+  }
+  if (session.user.role === 'user' && session.user.id) {
+    filter.userId = session.user.id;
+  }
 
   const entries = await UsageHistory.find(filter)
+    .populate('userId', 'username')
+    .populate('adminId', 'username')
     .sort({ date: -1 })
     .limit(limit)
     .lean();

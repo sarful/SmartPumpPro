@@ -84,7 +84,7 @@ export default function UserRegisterPage() {
       <div className="mx-auto max-w-md rounded-2xl border border-slate-800 bg-slate-950/70 p-8 shadow-2xl shadow-slate-950/40">
         <div className="mb-6">
           <p className="text-sm uppercase tracking-[0.2em] text-cyan-300">
-            SmartPump Pro
+            PumpPilot
           </p>
           <h1 className="mt-2 text-2xl font-semibold">User Registration</h1>
           <p className="text-sm text-slate-400">Join an active admin and start pumping.</p>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
+import Link from "next/link";
 
 type UserRow = {
   _id: string;
@@ -150,7 +151,7 @@ void setup() {
 
   WiFiManager wm;
   wm.setConfigPortalTimeout(180);
-  if (!wm.autoConnect("SmartPump-Setup")) {
+  if (!wm.autoConnect("PumpPilot-Setup")) {
     delay(2000);
     ESP.restart();
   }
@@ -385,7 +386,7 @@ void setup() {
   WiFiManager wm;
   wm.setConfigPortalTimeout(180);
 
-  if (!wm.autoConnect("SmartPump-Setup")) {
+  if (!wm.autoConnect("PumpPilot-Setup")) {
     delay(2000);
     ESP.restart();
   }
@@ -765,21 +766,32 @@ void loop() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 px-4 py-8 text-slate-50">
-      <div className="mx-auto flex max-w-6xl flex-col gap-6">
-        <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mx-auto mt-2 flex max-w-6xl flex-col gap-6">
+        <header className="flex flex-col items-center gap-2 text-center">
           <div>
-            <p className="text-sm uppercase tracking-[0.2em] text-cyan-300">SmartPump Pro</p>
+            <p className="text-sm uppercase tracking-[0.2em] text-cyan-300">PumpPilot</p>
             <h1 className="text-2xl font-semibold sm:text-3xl">Admin Dashboard</h1>
+            <p className="text-sm text-slate-300">
+              Admin: {session?.user?.username || session?.user?.name || "-"}
+            </p>
             <p className="text-sm text-slate-300">
               Manage users, wallet recharges, load shedding, and queue.
             </p>
           </div>
-          <button
-            onClick={() => signOut({ callbackUrl: "/admin/login" })}
-            className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
-          >
-            Logout
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/logs"
+              className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
+            >
+              Logs
+            </Link>
+            <button
+              onClick={() => signOut({ callbackUrl: "/admin/login" })}
+              className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
+            >
+              Logout
+            </button>
+          </div>
         </header>
 
         {error && (

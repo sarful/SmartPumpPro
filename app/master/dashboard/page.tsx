@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
+import Link from "next/link";
 
 type AdminRow = { _id: string; username: string; status: string; loadShedding?: boolean; suspendReason?: string };
 type UserRow = { _id: string; username: string; adminId: string; adminName?: string; availableMinutes: number; motorStatus: string; status?: string; suspendReason?: string };
@@ -216,19 +217,30 @@ export default function MasterDashboardPage() {
 
   return (
     <div className="min-h-screen bg-white px-4 py-8 text-slate-900">
-      <div className="mx-auto flex max-w-6xl flex-col gap-6">
-        <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mx-auto mt-2 flex max-w-6xl flex-col gap-6">
+        <header className="flex flex-col items-center gap-2 text-center">
           <div>
-            <p className="text-sm uppercase tracking-[0.2em] text-blue-600">SmartPump Pro</p>
+            <p className="text-sm uppercase tracking-[0.2em] text-blue-600">PumpPilot</p>
             <h1 className="text-2xl font-semibold sm:text-3xl">Master Dashboard</h1>
+            <p className="text-sm text-slate-600">
+              Master Admin: {session?.user?.username || session?.user?.name || "-"}
+            </p>
             <p className="text-sm text-slate-600">Create, approve, suspend and delete admins and users.</p>
           </div>
-          <button
-            onClick={() => signOut({ callbackUrl: "/admin/login" })}
-            className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-slate-400 hover:text-slate-900"
-          >
-            Logout
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/logs"
+              className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-slate-400 hover:text-slate-900"
+            >
+              Logs
+            </Link>
+            <button
+              onClick={() => signOut({ callbackUrl: "/admin/login" })}
+              className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-slate-400 hover:text-slate-900"
+            >
+              Logout
+            </button>
+          </div>
         </header>
 
         {error && (
