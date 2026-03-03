@@ -6,6 +6,24 @@ import User from "@/models/User";
 import Queue from "@/models/Queue";
 import SystemState from "@/models/SystemState";
 
+type AdminLean = {
+  _id: unknown;
+  username?: string;
+  status?: string;
+  loadShedding?: boolean;
+  suspendReason?: string | null;
+};
+
+type UserLean = {
+  _id: unknown;
+  username?: string;
+  adminId?: unknown;
+  status?: string;
+  suspendReason?: string | null;
+  availableMinutes?: number;
+  motorStatus?: string;
+};
+
 export async function GET(req: NextRequest) {
   try {
     const payload = getMobileAccessPayload(req);
@@ -31,31 +49,34 @@ export async function GET(req: NextRequest) {
       ).lean(),
     ]);
 
-    const adminNameMap = Object.fromEntries(admins.map((a: any) => [String(a._id), a.username]));
-    const usersWithAdmin = users.map((u: any) => ({
-      id: String(u._id),
-      username: u.username,
-      adminId: String(u.adminId),
-      adminName: adminNameMap[String(u.adminId)] ?? String(u.adminId),
-      status: u.status ?? "active",
-      suspendReason: u.suspendReason ?? null,
-      availableMinutes: u.availableMinutes ?? 0,
-      motorStatus: u.motorStatus ?? "OFF",
+    const adminList = admins as AdminLean[];
+    const userList = users as UserLean[];
+
+    const adminNameMap = Object.fromEntries(adminList.map((admin) => [String(admin._id), admin.username]));
+    const usersWithAdmin = userList.map((user) => ({
+      id: String(user._id),
+      username: user.username,
+      adminId: String(user.adminId),
+      adminName: adminNameMap[String(user.adminId)] ?? String(user.adminId),
+      status: user.status ?? "active",
+      suspendReason: user.suspendReason ?? null,
+      availableMinutes: user.availableMinutes ?? 0,
+      motorStatus: user.motorStatus ?? "OFF",
     }));
 
-    const adminsList = admins.map((a: any) => ({
-      id: String(a._id),
-      username: a.username,
-      status: a.status,
-      loadShedding: Boolean(a.loadShedding),
-      suspendReason: a.suspendReason ?? null,
+    const adminsList = adminList.map((admin) => ({
+      id: String(admin._id),
+      username: admin.username,
+      status: admin.status,
+      loadShedding: Boolean(admin.loadShedding),
+      suspendReason: admin.suspendReason ?? null,
     }));
 
     return NextResponse.json({
       overview: { adminCount, userCount, running, waiting },
       manualAdminApproval: settings?.manualAdminApproval ?? true,
       admins: adminsList,
-      pendingAdmins: adminsList.filter((a: any) => a.status === "pending"),
+      pendingAdmins: adminsList.filter((admin) => admin.status === "pending"),
       users: usersWithAdmin,
     });
   } catch (error) {

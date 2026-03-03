@@ -8,6 +8,11 @@ import { activateLoadShedding, clearLoadShedding } from '@/lib/loadshedding-engi
 
 const BAD_REQUEST = { error: 'adminId is required' };
 
+type AdminSnapshot = {
+  loadShedding?: boolean;
+  username?: string;
+};
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const adminId = searchParams.get('adminId');
@@ -45,7 +50,7 @@ export async function GET(req: NextRequest) {
     }
 
     const adminLookupId = (adminId ?? user.adminId?.toString()) || null;
-    let admin = adminLookupId
+    let admin: AdminSnapshot | null = adminLookupId
       ? await Admin.findById(adminLookupId).select({ loadShedding: 1, username: 1 }).lean()
       : null;
 
@@ -59,7 +64,7 @@ export async function GET(req: NextRequest) {
         } else {
           await clearLoadShedding(adminLookupId);
         }
-        admin = { ...(admin || {}), loadShedding: sensed, username: admin?.username } as any;
+        admin = { ...(admin || {}), loadShedding: sensed, username: admin?.username };
       }
     }
 

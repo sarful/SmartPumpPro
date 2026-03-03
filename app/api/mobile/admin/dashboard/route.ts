@@ -6,6 +6,43 @@ import User from "@/models/User";
 import MinuteRequest from "@/models/MinuteRequest";
 import Queue from "@/models/Queue";
 
+type UserLean = {
+  _id: unknown;
+  username?: string;
+  availableMinutes?: number;
+  motorStatus?: string;
+  motorRunningTime?: number;
+  status?: string;
+  suspendReason?: string | null;
+};
+
+type MinuteRequestLean = {
+  _id: unknown;
+  userId?: unknown;
+  minutes?: number;
+  createdAt?: Date;
+};
+
+type QueueLean = {
+  _id: unknown;
+  position?: number;
+  status?: string;
+  requestedMinutes?: number;
+  userId?: unknown;
+};
+
+function getPopulatedUsername(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as { username?: unknown };
+  return typeof record.username === "string" ? record.username : null;
+}
+
+function getPopulatedId(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as { _id?: unknown };
+  return record._id ? String(record._id) : null;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const payload = getMobileAccessPayload(req);
@@ -54,7 +91,7 @@ export async function GET(req: NextRequest) {
         suspendReason: admin.suspendReason ?? null,
         loadShedding: Boolean(admin.loadShedding),
       },
-      users: users.map((u: any) => ({
+      users: (users as UserLean[]).map((u) => ({
         id: String(u._id),
         username: u.username,
         availableMinutes: u.availableMinutes ?? 0,
@@ -63,19 +100,19 @@ export async function GET(req: NextRequest) {
         status: u.status ?? "active",
         suspendReason: u.suspendReason ?? null,
       })),
-      pendingRequests: requests.map((r: any) => ({
+      pendingRequests: (requests as MinuteRequestLean[]).map((r) => ({
         id: String(r._id),
-        userId: typeof r.userId === "object" ? String(r.userId?._id) : String(r.userId),
-        username: typeof r.userId === "object" ? r.userId?.username : null,
+        userId: getPopulatedId(r.userId) ?? String(r.userId),
+        username: getPopulatedUsername(r.userId),
         minutes: r.minutes,
         createdAt: r.createdAt,
       })),
-      queue: queue.map((q: any) => ({
+      queue: (queue as QueueLean[]).map((q) => ({
         id: String(q._id),
         position: q.position,
         status: q.status,
         requestedMinutes: q.requestedMinutes,
-        username: typeof q.userId === "object" ? q.userId?.username : null,
+        username: getPopulatedUsername(q.userId),
       })),
     });
   } catch (error) {

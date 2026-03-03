@@ -1,12 +1,38 @@
 "use client";
 
-import { useMemo, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import useRealtime from "@/hooks/useRealtime";
 
 type MotorStatus = "OFF" | "RUNNING" | "HOLD";
 type MinuteReqStatus = "pending" | "approved" | "declined";
+type UserStatus = "active" | "suspended";
+
+type RealtimePayload = {
+  motorStatus: MotorStatus;
+  remainingMinutes: number;
+  loadShedding: boolean;
+  queuePosition?: number | null;
+  runningUser?: string | null;
+  estimatedWait?: number | null;
+};
+
+type UserMePayload = {
+  availableMinutes?: number;
+  queuePosition?: number | null;
+  adminName?: string;
+  username?: string;
+  status?: UserStatus;
+  suspendReason?: string | null;
+  adminStatus?: UserStatus;
+  adminReason?: string | null;
+};
+
+type MinuteRequestItem = {
+  status?: MinuteReqStatus;
+  minutes?: number;
+};
 
 const statusColors: Record<MotorStatus, string> = {
   RUNNING: "bg-emerald-100 text-emerald-800 border border-emerald-200",
@@ -15,6 +41,10 @@ const statusColors: Record<MotorStatus, string> = {
 };
 
 const cardClass = "rounded-2xl border border-gray-200 bg-white shadow-sm p-4";
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
 
 export default function UserDashboardPage() {
   const router = useRouter();
@@ -28,9 +58,7 @@ export default function UserDashboardPage() {
   const [optimisticStatus, setOptimisticStatus] = useState<MotorStatus | null>(null);
   const [optimisticRemaining, setOptimisticRemaining] = useState<number | null>(null);
   const [startLoading, setStartLoading] = useState(false);
-  const [startError, setStartError] = useState<string | null>(null);
   const [stopLoading, setStopLoading] = useState(false);
-  const [stopError, setStopError] = useState<string | null>(null);
   const [extendLoading, setExtendLoading] = useState(false);
   const [extendError, setExtendError] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
@@ -40,9 +68,9 @@ export default function UserDashboardPage() {
   const [pendingRequest, setPendingRequest] = useState<{ minutes: number; status: MinuteReqStatus } | null>(null);
   const [localQueueCleared, setLocalQueueCleared] = useState(false);
   const [showRequest, setShowRequest] = useState(false);
-  const [userStatus, setUserStatus] = useState<"active" | "suspended">("active");
+  const [userStatus, setUserStatus] = useState<UserStatus>("active");
   const [userReason, setUserReason] = useState<string | null>(null);
-  const [adminStatus, setAdminStatus] = useState<"active" | "suspended">("active");
+  const [adminStatus, setAdminStatus] = useState<UserStatus>("active");
   const [adminReason, setAdminReason] = useState<string | null>(null);
 
   const role = session?.user?.role;
@@ -55,14 +83,7 @@ export default function UserDashboardPage() {
     /^[a-fA-F0-9]+$/.test(ADMIN_ID) &&
     /^[a-fA-F0-9]+$/.test(USER_ID);
 
-  const { loading, data, error } = useRealtime<{
-    motorStatus: MotorStatus;
-    remainingMinutes: number;
-    loadShedding: boolean;
-    queuePosition?: number;
-    runningUser?: string | null;
-    estimatedWait?: number | null;
-  }>({
+  const { loading, data, error } = useRealtime<RealtimePayload>({
     url: `/api/esp32/poll?adminId=${ADMIN_ID}&userId=${USER_ID}`,
     enabled: idsValid && isUser,
   });
@@ -77,7 +98,6 @@ export default function UserDashboardPage() {
   const queueValue = localQueueCleared ? null : queuePositionLive ?? queuePosition;
   const effectiveStatus = optimisticStatus ?? motorStatus;
   const effectiveRemaining = optimisticRemaining ?? remainingMinutes;
-  // Show queue cards only when actually queued (position > 0)
   const showQueueCards = queueValue !== null && queueValue !== undefined && queueValue !== 0;
   const isSuspendedUser = userStatus === "suspended";
   const isSuspendedAdmin = adminStatus === "suspended";
@@ -87,67 +107,24 @@ export default function UserDashboardPage() {
       ? adminReason || "Your admin has been suspended."
       : null;
 
-  // Clear optimistic when real data arrives
   useEffect(() => {
     if (data?.motorStatus !== undefined) {
       setOptimisticStatus(null);
       setOptimisticRemaining(null);
     }
-    if (data?.queuePosition !== undefined) {
+    if (data && "queuePosition" in data) {
       setLocalQueueCleared(false);
     }
-  }, [data?.motorStatus, data?.remainingMinutes]);
+  }, [data]);
 
-  const statusLabel = useMemo(() => effectiveStatus, [effectiveStatus]);
-
-  if (sessionStatus === "unauthenticated") {
-    return (
-      <div className="min-h-screen bg-slate-950 px-4 py-10 text-slate-100">
-        <div className="mx-auto max-w-lg rounded-xl border border-slate-800 bg-slate-900/70 p-6 text-center">
-          <p className="text-lg font-semibold">Please sign in to view your dashboard.</p>
-          <button
-            onClick={() => router.push("/user/login")}
-            className="mt-4 rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-900"
-          >
-            Go to Login
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (sessionStatus === "authenticated" && !isUser) {
-    return (
-      <div className="min-h-screen bg-slate-950 px-4 py-10 text-slate-100">
-        <div className="mx-auto max-w-lg rounded-xl border border-slate-800 bg-slate-900/70 p-6 text-center">
-          <p className="text-lg font-semibold">This dashboard is for Users only.</p>
-          <p className="mt-2 text-sm text-slate-300">Please sign in with a user account.</p>
-          <div className="mt-4 flex justify-center gap-3">
-            <button
-              onClick={() => signOut({ callbackUrl: "/user/login" })}
-              className="rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-900"
-            >
-              Sign out
-            </button>
-            <button
-              onClick={() => router.push("/user/login")}
-              className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-100 hover:border-cyan-400 hover:text-cyan-200"
-            >
-              User Login
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Load wallet/queue info
   useEffect(() => {
     const load = async () => {
-      if (!idsValid) return;
+      if (!idsValid || !isUser) return;
+
       try {
         const res = await fetch("/api/user/me", { cache: "no-store" });
-        const json = await res.json();
+        const json = (await res.json()) as UserMePayload;
+
         if (res.ok) {
           setAvailableMinutes(json.availableMinutes ?? 0);
           setQueuePosition(json.queuePosition ?? null);
@@ -162,114 +139,154 @@ export default function UserDashboardPage() {
         // ignore
       }
 
-      // Load recent minute requests
       try {
         const resReq = await fetch("/api/user/minute-request", { cache: "no-store" });
         if (resReq.ok) {
-          const jr = await resReq.json();
-          const pending = (jr.requests as any[])?.find((r) => r.status === "pending");
+          const json = (await resReq.json()) as { requests?: MinuteRequestItem[] };
+          const pending = json.requests?.find((req) => req.status === "pending");
+
           if (pending) {
-            setPendingRequest({ minutes: pending.minutes ?? 0, status: "pending" });
-            setRequestMessage(`Pending approval: ${pending.minutes}m`);
+            const minutes = pending.minutes ?? 0;
+            setPendingRequest({ minutes, status: "pending" });
+            setRequestMessage(`Pending approval: ${minutes}m`);
             setShowRequest(true);
           } else {
             setPendingRequest(null);
+            setRequestMessage(null);
           }
         }
       } catch {
         // ignore
       }
     };
+
     load();
-    const id = setInterval(load, 10000);
-    return () => clearInterval(id);
-  }, [idsValid]);
+    const intervalId = setInterval(load, 10000);
+    return () => clearInterval(intervalId);
+  }, [idsValid, isUser]);
 
   const handleStart = async () => {
-    setStartError(null);
-    if (!idsValid) {
-      setStartError("Missing or invalid session IDs");
-      return;
-    }
+    if (!idsValid) return;
+
+    setRequestError(null);
     setStartLoading(true);
+
     try {
       const res = await fetch("/api/motor/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: USER_ID, requestedMinutes: setMinutes }),
       });
+
       if (!res.ok) {
         const msg = await res.text();
         throw new Error(msg || "Failed to start motor");
       }
-      const data: { status: "RUNNING" | "WAITING"; queuePosition?: number } = await res.json();
-      setQueuePosition(data.status === "WAITING" ? data.queuePosition ?? null : 0);
+
+      const startResult = (await res.json()) as { status: "RUNNING" | "WAITING"; queuePosition?: number };
+      setQueuePosition(startResult.status === "WAITING" ? startResult.queuePosition ?? null : 0);
       setLocalQueueCleared(false);
-      if (data.status === "RUNNING") {
+
+      if (startResult.status === "RUNNING") {
         setOptimisticStatus("RUNNING");
         setOptimisticRemaining(setMinutes);
       }
-    } catch (err: any) {
-      setStartError(err instanceof Error ? err.message : "Unknown error");
+    } catch (err) {
+      setRequestError(getErrorMessage(err, "Failed to start motor"));
     } finally {
       setStartLoading(false);
     }
   };
 
-  const handleStop = () => {
-    setStopError(null);
-    if (!idsValid) {
-      setStopError("Missing or invalid session IDs");
-      return;
-    }
+  const handleStop = async () => {
+    if (!idsValid) return;
+
+    setRequestError(null);
     setStopLoading(true);
-    fetch("/api/motor/stop", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: USER_ID }),
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const msg = await res.text();
-          throw new Error(msg || "Failed to stop motor");
-        }
-        await res.json();
-        setQueuePosition(null); // clear UI queue position
-        router.refresh();
-        setOptimisticStatus("OFF");
-        setOptimisticRemaining(0);
-      })
-      .catch((err: any) => {
-        setStopError(err instanceof Error ? err.message : "Unknown error");
-      })
-      .finally(() => {
-        setStopLoading(false);
-        setLocalQueueCleared(true); // ensure UI resets to normal position after stop
+
+    try {
+      const res = await fetch("/api/motor/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: USER_ID }),
       });
+
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || "Failed to stop motor");
+      }
+
+      await res.json();
+      setQueuePosition(null);
+      setOptimisticStatus("OFF");
+      setOptimisticRemaining(0);
+      setLocalQueueCleared(true);
+      router.refresh();
+    } catch (err) {
+      setRequestError(getErrorMessage(err, "Failed to stop motor"));
+    } finally {
+      setStopLoading(false);
+    }
   };
+
+  const gateView =
+    sessionStatus === "unauthenticated" ? (
+      <div className="min-h-screen bg-white px-4 py-10 text-slate-900">
+        <div className="mx-auto max-w-lg rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+          <p className="text-lg font-semibold">Please sign in to view your dashboard.</p>
+          <button
+            onClick={() => router.push("/user/login")}
+            className="mt-4 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-white"
+          >
+            Go to Login
+          </button>
+        </div>
+      </div>
+    ) : sessionStatus === "authenticated" && !isUser ? (
+      <div className="min-h-screen bg-white px-4 py-10 text-slate-900">
+        <div className="mx-auto max-w-lg rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+          <p className="text-lg font-semibold">This dashboard is for users only.</p>
+          <p className="mt-2 text-sm text-slate-600">Please sign in with a user account.</p>
+          <div className="mt-4 flex justify-center gap-3">
+            <button
+              onClick={() => signOut({ callbackUrl: "/user/login" })}
+              className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-white"
+            >
+              Sign out
+            </button>
+            <button
+              onClick={() => router.push("/user/login")}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:border-cyan-400 hover:text-cyan-700"
+            >
+              User Login
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null;
+
+  if (gateView) return gateView;
 
   return (
     <div className="min-h-screen bg-white px-4 py-8 text-slate-900">
       <div className="mx-auto flex max-w-6xl flex-col gap-6">
         <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm uppercase tracking-[0.2em] text-cyan-300">
-              SmartPump Pro
-            </p>
-            <h1 className="text-2xl font-semibold sm:text-3xl">
-              Welcome, {userName}
-            </h1>
-            <p className="mt-1 text-sm text-slate-300">
-              Admin: <span className="font-semibold text-slate-100">{adminName}</span>
+            <p className="text-sm uppercase tracking-[0.2em] text-cyan-600">SmartPump Pro</p>
+            <h1 className="text-2xl font-semibold sm:text-3xl">Welcome, {userName}</h1>
+            <p className="mt-1 text-sm text-slate-600">
+              Admin: <span className="font-semibold text-slate-900">{adminName}</span>
             </p>
           </div>
-          <div className="flex items-center gap-2 text-sm text-slate-300">
+          <div className="flex items-center gap-2 text-sm text-slate-600">
             <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
-            {idsValid ? "Live status ready for integration" : "Missing Admin/User IDs"}
+            {idsValid ? "Live status ready" : "Missing Admin/User IDs"}
+            {loading ? " | syncing..." : ""}
+            {error ? " | realtime degraded" : ""}
             {sessionStatus === "authenticated" && (
               <button
                 onClick={() => signOut({ callbackUrl: "/user/login" })}
-                className="ml-3 rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
+                className="ml-3 rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-cyan-400 hover:text-cyan-700"
               >
                 Logout
               </button>
@@ -278,48 +295,38 @@ export default function UserDashboardPage() {
         </header>
 
         {suspendedReason && (
-          <div className="rounded-xl border border-red-500/40 bg-red-900/60 px-4 py-3 text-sm text-red-100 shadow-lg shadow-red-900/30">
+          <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
             Account suspended: {suspendedReason}
           </div>
         )}
 
         {!suspendedReason && lowBalance && (
-          <div className="rounded-xl border border-amber-500/40 bg-amber-900/60 px-4 py-3 text-sm text-amber-100 shadow-lg shadow-amber-900/30">
-            আপনার পাঁচ মিনিটের কম ব্যালান্স আছে, রিচার্জ করুন।
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Your balance is below 5 minutes. Please recharge.
           </div>
         )}
 
         {loadShedding && (
-          <div className="rounded-xl border border-red-500/40 bg-red-900/40 px-4 py-3 text-sm text-red-100 shadow-lg shadow-red-900/30">
-            ⚠️ Load shedding active — motor is paused until power resumes.
+          <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+            Load shedding active - motor is paused until power resumes.
           </div>
         )}
 
-        <div className="grid w-full max-w-5xl mx-auto gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <StatusCard title="Motor Status" value={statusLabel} status={effectiveStatus} />
+        {requestError && (
+          <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {requestError}
+          </div>
+        )}
+
+        <div className="mx-auto grid w-full max-w-5xl gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <StatusCard title="Motor Status" value={effectiveStatus} status={effectiveStatus} />
           <InfoCard title="Remaining Minutes" value={`${effectiveRemaining}m`} />
           <InfoCard title="Available Minutes" value={`${availableMinutes}m`} />
+
           {showQueueCards && (
             <>
-              <InfoCard
-                title="Running User"
-                value={
-                  effectiveStatus === "RUNNING"
-                    ? "You"
-                    : runningUser
-                      ? runningUser
-                      : "—"
-                }
-              />
-              <InfoCard
-                title="Est. Wait"
-                value={
-                  queueValue && queueValue > 0
-                    ? `${estimatedWait ?? "—"}m`
-                    : "—"
-                }
-                subtle
-              />
+              <InfoCard title="Running User" value={effectiveStatus === "RUNNING" ? "You" : runningUser || "-"} />
+              <InfoCard title="Est. Wait" value={queueValue && queueValue > 0 ? `${estimatedWait ?? "-"}m` : "-"} subtle />
               <InfoCard
                 title="Queue Position"
                 value={
@@ -343,31 +350,22 @@ export default function UserDashboardPage() {
               />
             </>
           )}
-          {pendingRequest && (
-            <InfoCard
-              title="Request Minutes"
-              value={`Pending approval: ${pendingRequest.minutes}m`}
-              subtle
-            />
-          )}
+
+          {pendingRequest && <InfoCard title="Request Minutes" value={`Pending approval: ${pendingRequest.minutes}m`} subtle />}
         </div>
 
         <div className="flex flex-col items-center gap-4">
           <div
             className={`w-full max-w-4xl rounded-2xl border border-gray-200 bg-white p-6 shadow-md ${
-              loadShedding || suspendedReason ? "opacity-60 pointer-events-none" : ""
+              loadShedding || suspendedReason ? "pointer-events-none opacity-60" : ""
             }`}
           >
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-slate-500">Set Minutes</div>
-                <div className="text-lg font-semibold text-slate-900">
-                  Configure your run time
-                </div>
+                <div className="text-lg font-semibold text-slate-900">Configure your run time</div>
               </div>
-              <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-slate-600">
-                Wallet: {availableMinutes}m
-              </span>
+              <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-slate-600">Wallet: {availableMinutes}m</span>
             </div>
 
             <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center">
@@ -376,7 +374,7 @@ export default function UserDashboardPage() {
                 min={1}
                 className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-base text-slate-900 outline-none ring-0 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
                 value={setMinutes}
-                onChange={(e) => setSetMinutes(Math.max(1, Number(e.target.value)))}
+                onChange={(event) => setSetMinutes(Math.max(1, Number(event.target.value)))}
               />
               <div className="flex w-full flex-1 items-center gap-3">
                 <button
@@ -413,6 +411,7 @@ export default function UserDashboardPage() {
                       setExtendError("Missing or invalid session IDs");
                       return;
                     }
+
                     setExtendLoading(true);
                     try {
                       const res = await fetch("/api/motor/extend", {
@@ -420,100 +419,94 @@ export default function UserDashboardPage() {
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ userId: USER_ID, minutes: 1 }),
                       });
-                      const json = await res.json();
+
+                      const json = (await res.json()) as { error?: string; availableMinutes?: number };
                       if (!res.ok) throw new Error(json.error || "Failed to add minutes");
+
                       setAvailableMinutes(json.availableMinutes ?? availableMinutes - 1);
-                      setOptimisticRemaining((prev) => (prev ?? effectiveRemaining) + 1);
-                    } catch (err: any) {
-                      setExtendError(err instanceof Error ? err.message : "Unknown error");
+                      setOptimisticRemaining((previous) => (previous ?? effectiveRemaining) + 1);
+                    } catch (err) {
+                      setExtendError(getErrorMessage(err, "Failed to add minutes"));
                     } finally {
                       setExtendLoading(false);
                     }
                   }}
-                  disabled={
-                    extendLoading ||
-                    availableMinutes <= 0 ||
-                    lowBalance ||
-                    suspendedReason !== null
-                  }
+                  disabled={extendLoading || availableMinutes <= 0 || lowBalance || suspendedReason !== null}
                   className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-600 disabled:opacity-50"
                 >
                   {extendLoading ? "Adding..." : "+ Add 1 minute"}
                 </button>
-                {extendError && (
-                  <div className="mt-2 text-xs text-red-300">Extend error: {extendError}</div>
-                )}
-                </div>
-              )}
-
+                {extendError && <div className="mt-2 text-xs text-red-600">Extend error: {extendError}</div>}
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="flex w-full max-w-5xl items-center justify-center mx-auto">
+        <div className="mx-auto flex w-full max-w-5xl items-center justify-center">
           <button
-            onClick={() => setShowRequest((s) => !s)}
+            onClick={() => setShowRequest((show) => !show)}
             className="rounded-full bg-[#2563eb] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#1e4fbf]"
           >
             {showRequest ? "Hide Buy Minutes" : "Buy Minutes"}
-        </button>
-      </div>
-
-      {showRequest && (
-        <div className="w-full max-w-4xl rounded-2xl border border-gray-200 bg-white p-6 shadow-md mx-auto">
-          <div className="text-sm text-slate-600">Request more minutes</div>
-          <div className="mt-2 flex gap-3 sm:flex-row flex-col">
-            <input
-              type="number"
-              min={1}
-              className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-slate-900"
-              value={requestMinutes}
-              onChange={(e) => setRequestMinutes(Math.max(1, Number(e.target.value)))}
-            />
-            <button
-              onClick={async () => {
-                setRequestError(null);
-                setRequestMessage(null);
-                setPendingRequest(null);
-                if (!idsValid) {
-                  setRequestError("Missing or invalid session IDs");
-                  return;
-                }
-                if (pendingRequest) {
-                  setRequestError("Request already pending, wait for admin approval.");
-                  return;
-                }
-                setRequestLoading(true);
-                try {
-                  const res = await fetch("/api/user/minute-request", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ minutes: requestMinutes }),
-                  });
-                  const json = await res.json();
-                  if (!res.ok) throw new Error(json.error || "Request failed");
-                  setPendingRequest({ minutes: requestMinutes, status: "pending" });
-                  setRequestMessage("Request sent — wait for admin approval");
-                } catch (err: any) {
-                  setRequestError(err instanceof Error ? err.message : "Unknown error");
-                } finally {
-                  setRequestLoading(false);
-                }
-              }}
-              disabled={
-                requestLoading ||
-                requestMinutes <= 0 ||
-                suspendedReason !== null ||
-                !!pendingRequest
-              }
-              className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-cyan-400 disabled:opacity-60"
-            >
-              {requestLoading ? "Sending..." : "Send Request"}
-            </button>
-          </div>
-          {requestError && <p className="mt-2 text-xs text-red-600">{requestError}</p>}
-          {requestMessage && <p className="mt-2 text-xs text-emerald-600">{requestMessage}</p>}
+          </button>
         </div>
-      )}
+
+        {showRequest && (
+          <div className="mx-auto w-full max-w-4xl rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
+            <div className="text-sm text-slate-600">Request more minutes</div>
+            <div className="mt-2 flex flex-col gap-3 sm:flex-row">
+              <input
+                type="number"
+                min={1}
+                className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-slate-900"
+                value={requestMinutes}
+                onChange={(event) => setRequestMinutes(Math.max(1, Number(event.target.value)))}
+              />
+              <button
+                onClick={async () => {
+                  setRequestError(null);
+                  setRequestMessage(null);
+                  setPendingRequest(null);
+
+                  if (!idsValid) {
+                    setRequestError("Missing or invalid session IDs");
+                    return;
+                  }
+
+                  if (pendingRequest) {
+                    setRequestError("Request already pending, wait for admin approval.");
+                    return;
+                  }
+
+                  setRequestLoading(true);
+                  try {
+                    const res = await fetch("/api/user/minute-request", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ minutes: requestMinutes }),
+                    });
+
+                    const json = (await res.json()) as { error?: string };
+                    if (!res.ok) throw new Error(json.error || "Request failed");
+
+                    setPendingRequest({ minutes: requestMinutes, status: "pending" });
+                    setRequestMessage("Request sent - wait for admin approval");
+                  } catch (err) {
+                    setRequestError(getErrorMessage(err, "Failed to send request"));
+                  } finally {
+                    setRequestLoading(false);
+                  }
+                }}
+                disabled={requestLoading || requestMinutes <= 0 || suspendedReason !== null || Boolean(pendingRequest)}
+                className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-cyan-400 disabled:opacity-60"
+              >
+                {requestLoading ? "Sending..." : "Send Request"}
+              </button>
+            </div>
+            {requestError && <p className="mt-2 text-xs text-red-600">{requestError}</p>}
+            {requestMessage && <p className="mt-2 text-xs text-emerald-600">{requestMessage}</p>}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -530,9 +523,7 @@ function StatusCard({ title, value, status }: StatusCardProps) {
     <div className={cardClass}>
       <div className="text-sm text-slate-500">{title}</div>
       <div className="mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold">
-        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusColors[status]}`}>
-          {value}
-        </span>
+        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusColors[status]}`}>{value}</span>
       </div>
     </div>
   );
@@ -548,14 +539,7 @@ function InfoCard({ title, value, subtle }: InfoCardProps) {
   return (
     <div className={cardClass}>
       <div className="text-sm text-slate-500">{title}</div>
-      <div
-        className={`mt-3 text-xl font-semibold ${
-          subtle ? "text-slate-500" : "text-slate-900"
-        }`}
-      >
-        {value}
-      </div>
+      <div className={`mt-3 text-xl font-semibold ${subtle ? "text-slate-500" : "text-slate-900"}`}>{value}</div>
     </div>
   );
 }
-
