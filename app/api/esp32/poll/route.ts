@@ -6,12 +6,18 @@ import Queue from '@/models/Queue';
 import { getQueuePosition } from '@/lib/queue-engine';
 import { tickRunningMotors } from '@/lib/timer-engine';
 import { activateLoadShedding, clearLoadShedding } from '@/lib/loadshedding-engine';
+import { isDeviceReadyEffective } from '@/lib/device-readiness';
 
 const BAD_REQUEST = { error: 'adminId is required' };
 
 type AdminSnapshot = {
   loadShedding?: boolean;
   username?: string;
+  status?: 'pending' | 'active' | 'suspended';
+  suspendReason?: string | null;
+  deviceReady?: boolean;
+  devicePinHigh?: boolean;
+  deviceLastSeenAt?: Date | null;
 };
 
 export async function GET(req: NextRequest) {
@@ -19,6 +25,7 @@ export async function GET(req: NextRequest) {
   const adminId = searchParams.get('adminId');
   const userId = searchParams.get('userId');
   const lsParam = searchParams.get('ls'); // optional: ESP32 sensed load-shedding (true/1)
+  const devParam = searchParams.get('dev') ?? searchParams.get('device'); // optional: ESP32 device-ready pin (true/1)
 
   try {
     await connectDB();
@@ -52,7 +59,17 @@ export async function GET(req: NextRequest) {
 
     const adminLookupId = (adminId ?? user.adminId?.toString()) || null;
     let admin: AdminSnapshot | null = adminLookupId
-      ? await Admin.findById(adminLookupId).select({ loadShedding: 1, username: 1 }).lean()
+      ? await Admin.findById(adminLookupId)
+          .select({
+            loadShedding: 1,
+            username: 1,
+            status: 1,
+            suspendReason: 1,
+            deviceReady: 1,
+            devicePinHigh: 1,
+            deviceLastSeenAt: 1,
+          })
+          .lean()
       : null;
 
     // React to ESP32 sensed load shedding: pause/resume motors
@@ -69,8 +86,72 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    if (adminLookupId && devParam !== null) {
+      const devicePinHigh = ['1', 'true', 'on', 'yes', 'high'].includes(devParam.toLowerCase());
+      admin = await Admin.findByIdAndUpdate(
+        adminLookupId,
+        {
+          $set: {
+            deviceReady: devicePinHigh,
+            devicePinHigh,
+            deviceLastSeenAt: new Date(),
+          },
+        },
+        {
+          new: true,
+          projection: {
+            loadShedding: 1,
+            username: 1,
+            status: 1,
+            suspendReason: 1,
+            deviceReady: 1,
+            devicePinHigh: 1,
+            deviceLastSeenAt: 1,
+          },
+        },
+      ).lean();
+    }
+
+    // Gate motor by load shedding + device readiness + suspend status.
+    const effectiveDeviceReady = isDeviceReadyEffective(admin);
+    const adminBlocked =
+      (admin?.loadShedding ?? false) ||
+      !effectiveDeviceReady ||
+      admin?.status === 'suspended';
+
+    const runningQueue = await Queue.findOne({ adminId: adminLookupId, status: 'RUNNING' })
+      .select({ userId: 1 })
+      .lean();
+
+    if (runningQueue?.userId) {
+      const runningUser = await User.findById(runningQueue.userId)
+        .select({ status: 1, motorStatus: 1, motorRunningTime: 1 })
+        .lean();
+
+      const runningUserBlocked = runningUser?.status === 'suspended';
+      const shouldHold = adminBlocked || runningUserBlocked;
+
+      if (shouldHold && runningUser?.motorStatus === 'RUNNING') {
+        await User.updateOne(
+          { _id: runningQueue.userId },
+          { $set: { motorStatus: 'HOLD', motorStartTime: null } },
+        );
+      } else if (!shouldHold && runningUser?.motorStatus === 'HOLD') {
+        await User.updateOne(
+          { _id: runningQueue.userId },
+          {
+            $set: {
+              motorStatus: 'RUNNING',
+              motorStartTime: new Date(),
+              lastSetMinutes: runningUser.motorRunningTime ?? 0,
+            },
+          },
+        );
+      }
+    }
+
     const freshUser = await User.findById(user._id)
-      .select({ motorStatus: 1, motorRunningTime: 1, adminId: 1, username: 1 })
+      .select({ motorStatus: 1, motorRunningTime: 1, adminId: 1, username: 1, status: 1 })
       .lean();
 
     if (!freshUser) {
@@ -81,13 +162,29 @@ export async function GET(req: NextRequest) {
       adminId: freshUser.adminId,
       motorStatus: 'RUNNING',
     })
-      .select({ username: 1 })
+      .select({ username: 1, status: 1 })
       .lean();
+
+    const userBlocked = freshUser.status === 'suspended';
+    const holdReason = admin?.loadShedding
+      ? 'loadshedding'
+      : !effectiveDeviceReady
+        ? 'device_not_ready'
+        : admin?.status === 'suspended'
+          ? 'admin_suspended'
+          : userBlocked
+            ? 'user_suspended'
+            : null;
 
     return NextResponse.json({
       motorStatus: freshUser.motorStatus,
       remainingMinutes: freshUser.motorRunningTime ?? 0,
       loadShedding: admin?.loadShedding ?? false,
+      deviceReady: effectiveDeviceReady,
+      devicePinHigh: admin?.devicePinHigh ?? false,
+      adminStatus: admin?.status ?? 'active',
+      userStatus: freshUser.status ?? 'active',
+      holdReason,
       adminName: admin?.username ?? null,
       queuePosition: await getQueuePosition(freshUser.adminId.toString(), freshUser._id.toString()),
       runningUser: runningUserDoc?.username ?? null,

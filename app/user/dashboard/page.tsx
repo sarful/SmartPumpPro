@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import useRealtime from "@/hooks/useRealtime";
 
 type MotorStatus = "OFF" | "RUNNING" | "HOLD";
@@ -14,6 +13,10 @@ type RealtimePayload = {
   motorStatus: MotorStatus;
   remainingMinutes: number;
   loadShedding: boolean;
+  deviceReady?: boolean;
+  adminStatus?: UserStatus;
+  userStatus?: UserStatus;
+  holdReason?: "loadshedding" | "device_not_ready" | "admin_suspended" | "user_suspended" | null;
   queuePosition?: number | null;
   runningUser?: string | null;
   estimatedWait?: number | null;
@@ -28,6 +31,8 @@ type UserMePayload = {
   suspendReason?: string | null;
   adminStatus?: UserStatus;
   adminReason?: string | null;
+  loadShedding?: boolean;
+  deviceReady?: boolean;
 };
 
 type MinuteRequestItem = {
@@ -73,6 +78,7 @@ export default function UserDashboardPage() {
   const [userReason, setUserReason] = useState<string | null>(null);
   const [adminStatus, setAdminStatus] = useState<UserStatus>("active");
   const [adminReason, setAdminReason] = useState<string | null>(null);
+  const [deviceReady, setDeviceReady] = useState<boolean | null>(null);
 
   const role = session?.user?.role;
   const isUser = role === "user";
@@ -92,6 +98,7 @@ export default function UserDashboardPage() {
   const motorStatus = data?.motorStatus ?? "OFF";
   const remainingMinutes = data?.remainingMinutes ?? 0;
   const loadShedding = data?.loadShedding ?? false;
+  const realtimeDeviceReady = data?.deviceReady;
   const queuePositionLive = data?.queuePosition;
   const runningUser = data?.runningUser ?? null;
   const lowBalance = availableMinutes < 5;
@@ -103,10 +110,11 @@ export default function UserDashboardPage() {
   const isSuspendedUser = userStatus === "suspended";
   const isSuspendedAdmin = adminStatus === "suspended";
   const suspendedReason = isSuspendedUser
-    ? userReason || "Your account is suspended."
+    ? userReason || "You are suspended."
     : isSuspendedAdmin
-      ? adminReason || "Your admin has been suspended."
+      ? adminReason || "You are suspended by admin/master."
       : null;
+  const effectiveDeviceReady = realtimeDeviceReady ?? deviceReady;
 
   useEffect(() => {
     if (data?.motorStatus !== undefined) {
@@ -135,6 +143,7 @@ export default function UserDashboardPage() {
           setUserReason(json.suspendReason ?? null);
           setAdminStatus(json.adminStatus ?? "active");
           setAdminReason(json.adminReason ?? null);
+          setDeviceReady(json.deviceReady ?? null);
         }
       } catch {
         // ignore
@@ -287,7 +296,7 @@ export default function UserDashboardPage() {
 
         {suspendedReason && (
           <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
-            Account suspended: {suspendedReason}
+            You are suspended: {suspendedReason}
           </div>
         )}
 
@@ -299,9 +308,18 @@ export default function UserDashboardPage() {
 
         {loadShedding && (
           <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
-            Load shedding active - motor is paused until power resumes.
+            Load shedding active now. Motor is on HOLD until power resumes.
           </div>
         )}
+
+        {!suspendedReason &&
+          !loadShedding &&
+          effectiveDeviceReady === false &&
+          data?.holdReason === "device_not_ready" && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Your device is not ready.
+          </div>
+          )}
 
         {requestError && (
           <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -348,7 +366,7 @@ export default function UserDashboardPage() {
         <div className="flex flex-col items-center gap-4">
           <div
             className={`w-full max-w-4xl rounded-2xl border border-gray-200 bg-white p-6 shadow-md ${
-              loadShedding || suspendedReason ? "pointer-events-none opacity-60" : ""
+              loadShedding || suspendedReason || effectiveDeviceReady === false ? "pointer-events-none opacity-60" : ""
             }`}
           >
             <div className="flex items-center justify-between">
@@ -375,6 +393,7 @@ export default function UserDashboardPage() {
                     effectiveStatus === "RUNNING" ||
                     ((queuePositionLive ?? queuePosition) ?? 0) > 0 ||
                     loadShedding ||
+                    effectiveDeviceReady === false ||
                     lowBalance ||
                     suspendedReason !== null ||
                     startLoading ||
@@ -511,12 +530,12 @@ export default function UserDashboardPage() {
             </div>
             {sessionStatus === "authenticated" && (
               <div className="flex items-center gap-2">
-                <Link
-                  href="/logs"
+                <a
+                  href="/api/history?format=csv&download=1&limit=200"
                   className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-cyan-400 hover:text-cyan-700"
                 >
-                  Logs
-                </Link>
+                  Download History
+                </a>
                 <button
                   onClick={() => signOut({ callbackUrl: "/user/login" })}
                   className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-cyan-400 hover:text-cyan-700"

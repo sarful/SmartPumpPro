@@ -6,6 +6,7 @@ import Admin from "@/models/Admin";
 import Queue from "@/models/Queue";
 import MinuteRequest from "@/models/MinuteRequest";
 import { getQueuePosition } from "@/lib/queue-engine";
+import { isDeviceReadyEffective } from "@/lib/device-readiness";
 
 async function estimateWait(adminId: string, userId: string): Promise<number | null> {
   const entry = await Queue.findOne({
@@ -70,7 +71,7 @@ export async function GET(req: NextRequest) {
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
     const admin = await Admin.findById(user.adminId)
-      .select({ username: 1, status: 1, suspendReason: 1, loadShedding: 1 })
+      .select({ username: 1, status: 1, suspendReason: 1, loadShedding: 1, deviceReady: 1, deviceLastSeenAt: 1 })
       .lean();
 
     const runningUser = await User.findOne({ adminId: user.adminId, motorStatus: "RUNNING" })
@@ -100,6 +101,7 @@ export async function GET(req: NextRequest) {
       runningUser: runningUser?.username ?? null,
       estimatedWait,
       loadShedding: Boolean(admin?.loadShedding),
+      deviceReady: isDeviceReadyEffective(admin),
       userStatus: user.status ?? "active",
       userSuspendReason: user.suspendReason ?? null,
       adminStatus: admin?.status ?? "active",

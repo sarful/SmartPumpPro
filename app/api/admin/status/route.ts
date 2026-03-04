@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { connectDB } from '@/lib/mongodb';
 import Admin from '@/models/Admin';
+import { isDeviceOnline, isDeviceReadyEffective } from '@/lib/device-readiness';
 
 export async function GET(_req: NextRequest) {
   const session = await auth();
@@ -10,8 +11,14 @@ export async function GET(_req: NextRequest) {
   }
   await connectDB();
   const admin = await Admin.findById(session.user.adminId)
-    .select({ loadShedding: 1, status: 1, username: 1 })
+    .select({ loadShedding: 1, status: 1, username: 1, suspendReason: 1, deviceReady: 1, devicePinHigh: 1, deviceLastSeenAt: 1 })
     .lean();
   if (!admin) return NextResponse.json({ error: 'Admin not found' }, { status: 404 });
-  return NextResponse.json({ admin });
+  return NextResponse.json({
+    admin: {
+      ...admin,
+      deviceOnline: isDeviceOnline(admin.deviceLastSeenAt),
+      deviceReady: isDeviceReadyEffective(admin),
+    },
+  });
 }

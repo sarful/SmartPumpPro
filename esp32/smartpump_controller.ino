@@ -6,11 +6,12 @@
 
 #define MOTOR_PIN 5
 #define LOAD_PIN 4        // Digital input to read load-shedding signal (HIGH = shedding)
+#define DEVICE_PIN 18     // HIGH = device ready
 #define POLL_INTERVAL_MS 5000
 #define HTTP_TIMEOUT_MS 4000
 
-// Set a default; adjust after flashing (or compile-time)
-const char* POLL_URL      = "http://192.168.1.10:3000/api/esp32/poll?adminId=AAA&userId=BBB";
+const char* ADMIN_ID      = "PUT_ADMIN_ID_HERE";
+const char* API_HOST      = "http://192.168.1.10:3000";
 
 unsigned long lastPoll = 0;
 
@@ -26,12 +27,17 @@ void pollServer() {
   if (WiFi.status() != WL_CONNECTED) return;
 
   bool localLoadShedding = digitalRead(LOAD_PIN) == HIGH;
+  bool localDeviceReady = digitalRead(DEVICE_PIN) == HIGH;
+
+  String pollUrl = String(API_HOST) + "/api/esp32/poll?adminId=" + ADMIN_ID +
+                   "&ls=" + (localLoadShedding ? "1" : "0") +
+                   "&dev=" + (localDeviceReady ? "1" : "0");
 
   HTTPClient http;
   WiFiClient client;
 
   http.setTimeout(HTTP_TIMEOUT_MS);
-  http.begin(client, POLL_URL);
+  http.begin(client, pollUrl);
 
   int httpCode = http.GET();
   if (httpCode != HTTP_CODE_OK) {
@@ -54,12 +60,17 @@ void pollServer() {
   bool loadShedding = doc["loadShedding"] | false;
   int remaining = doc["remainingMinutes"] | 0;
 
-  Serial.printf("[POLL] status=%s remaining=%d loadShedding=%s localLS=%s\n",
+  Serial.printf("[POLL] status=%s remaining=%d loadShedding=%s localLS=%s dev=%s\n",
                 motorStatus, remaining,
                 loadShedding ? "true" : "false",
-                localLoadShedding ? "true" : "false");
+                localLoadShedding ? "true" : "false",
+                localDeviceReady ? "true" : "false");
 
-  bool turnOn = strcmp(motorStatus, "RUNNING") == 0 && !loadShedding && !localLoadShedding;
+  bool turnOn =
+    strcmp(motorStatus, "RUNNING") == 0 &&
+    !loadShedding &&
+    !localLoadShedding &&
+    localDeviceReady;
   setMotor(turnOn);
 }
 
@@ -68,6 +79,7 @@ void setup() {
   pinMode(MOTOR_PIN, OUTPUT);
   digitalWrite(MOTOR_PIN, LOW);
   pinMode(LOAD_PIN, INPUT_PULLUP);
+  pinMode(DEVICE_PIN, INPUT_PULLUP);
 
   // WiFiManager portal auto-connect
   wifiManager.setHostname("PumpPilot");

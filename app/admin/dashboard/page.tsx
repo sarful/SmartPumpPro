@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
-import Link from "next/link";
 
 type UserRow = {
   _id: string;
@@ -34,6 +33,9 @@ export default function AdminDashboardPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [loadShedding, setLoadShedding] = useState<boolean | null>(null);
+  const [deviceReady, setDeviceReady] = useState<boolean | null>(null);
+  const [adminStatus, setAdminStatus] = useState<string>("active");
+  const [adminSuspendReason, setAdminSuspendReason] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +51,7 @@ export default function AdminDashboardPage() {
   const [suspendError, setSuspendError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [stopResetLoadingUserId, setStopResetLoadingUserId] = useState<string | null>(null);
+  const [startLoadingUserId, setStartLoadingUserId] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
   const [espCodeType, setEspCodeType] = useState<"arduino" | "micropython" | "esp8266" | "ttgo">("arduino");
 
@@ -60,16 +63,39 @@ export default function AdminDashboardPage() {
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
-#define MOTOR_PIN 23
-#define LOAD_PIN 34
+// =========================
+// PumpPilot ESP32 Firmware
+// =========================
 
+// ---- PIN CONFIG ----
+#define MOTOR_PIN 2
+#define LOAD_PIN 4
+#define DEVICE_PIN 5
+
+// ---- SIGNAL POLARITY TOGGLES ----
+// Set 1 if signal is ACTIVE LOW, else 0
+#define LOAD_ACTIVE_LOW 0
+#define DEVICE_READY_ACTIVE_LOW 1
+
+// ---- TIMING ----
 #define POLL_INTERVAL_MS 5000
-#define HTTP_TIMEOUT_MS 6000
+#define HTTP_TIMEOUT_MS 8000
 
+// ---- SERVER CONFIG ----
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
 const char* API_HOST = "https://pms-two-kappa.vercel.app";
 
 unsigned long lastPoll = 0;
+
+bool readLoadSheddingPin() {
+  int raw = digitalRead(LOAD_PIN);
+  return LOAD_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+}
+
+bool readDeviceReadyPin() {
+  int raw = digitalRead(DEVICE_PIN);
+  return DEVICE_READY_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+}
 
 void setMotor(bool on) {
   digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
@@ -78,11 +104,13 @@ void setMotor(bool on) {
 
 void ensureWiFi() {
   if (WiFi.status() == WL_CONNECTED) return;
+
+  Serial.println("[WiFi] Reconnecting...");
   WiFi.reconnect();
 
   unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 8000) {
-    delay(200);
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
+    delay(250);
     Serial.print(".");
   }
   Serial.println();
@@ -91,16 +119,29 @@ void ensureWiFi() {
 void pollServer() {
   if (WiFi.status() != WL_CONNECTED) return;
 
-  bool localLS = (digitalRead(LOAD_PIN) == HIGH);
+  bool localLS = readLoadSheddingPin();
+  bool localDeviceReady = readDeviceReadyPin();
+
+  Serial.printf("[PIN] loadRaw=%d devRaw=%d ls=%d dev=%d\\n",
+                digitalRead(LOAD_PIN),
+                digitalRead(DEVICE_PIN),
+                localLS,
+                localDeviceReady);
 
   WiFiClientSecure client;
-  client.setInsecure();
+  client.setInsecure(); // quick test; use cert pinning for hardened security
+  client.setTimeout(HTTP_TIMEOUT_MS);
 
   HTTPClient http;
-  String url = String(API_HOST) + "/api/esp32/poll?adminId=" + ADMIN_ID + "&ls=" + (localLS ? "1" : "0");
+  String url = String(API_HOST) +
+               "/api/esp32/poll?adminId=" + ADMIN_ID +
+               "&ls=" + (localLS ? "1" : "0") +
+               "&dev=" + (localDeviceReady ? "1" : "0");
 
+  http.setConnectTimeout(HTTP_TIMEOUT_MS);
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.useHTTP10(true);
 
   if (!http.begin(client, url)) {
     Serial.println("[HTTP] begin failed");
@@ -108,14 +149,12 @@ void pollServer() {
   }
 
   int code = http.GET();
-
   if (code != HTTP_CODE_OK) {
+    Serial.printf("[HTTP] code=%d err=%s\\n", code, http.errorToString(code).c_str());
     String location = http.header("Location");
-    Serial.printf("[HTTP] code=%d", code);
     if (location.length() > 0) {
-      Serial.printf(" redirect=%s", location.c_str());
+      Serial.printf("[HTTP] redirect=%s\\n", location.c_str());
     }
-    Serial.println();
     http.end();
     return;
   }
@@ -126,37 +165,48 @@ void pollServer() {
   StaticJsonDocument<512> doc;
   DeserializationError err = deserializeJson(doc, payload);
   if (err) {
-    Serial.println("[JSON] parse error");
+    Serial.printf("[JSON] parse error: %s\\n", err.c_str());
     return;
   }
 
   const char* status = doc["motorStatus"] | "OFF";
   bool loadShedding = doc["loadShedding"] | false;
+  bool backendDeviceReady = doc["deviceReady"] | false;
   const char* adminName = doc["adminName"] | "unknown";
 
-  Serial.printf("[POLL] admin=%s status=%s ls=%d localLS=%d\\n",
-                adminName, status, loadShedding, localLS);
+  Serial.printf("[POLL] admin=%s status=%s ls=%d localLS=%d dev=%d backendDev=%d\\n",
+                adminName, status, loadShedding, localLS, localDeviceReady, backendDeviceReady);
 
-  bool turnOn = (strcmp(status, "RUNNING") == 0) && !loadShedding && !localLS;
+  bool turnOn =
+      (strcmp(status, "RUNNING") == 0) &&
+      !loadShedding &&
+      !localLS &&
+      localDeviceReady;
+
   setMotor(turnOn);
 }
 
 void setup() {
   Serial.begin(115200);
+  delay(300);
 
   pinMode(MOTOR_PIN, OUTPUT);
   digitalWrite(MOTOR_PIN, LOW);
 
   pinMode(LOAD_PIN, INPUT_PULLUP);
+  pinMode(DEVICE_PIN, INPUT_PULLUP);
+
+  WiFi.setSleep(false);
 
   WiFiManager wm;
   wm.setConfigPortalTimeout(180);
   if (!wm.autoConnect("PumpPilot-Setup")) {
+    Serial.println("[WiFi] Config timeout. Restarting...");
     delay(2000);
     ESP.restart();
   }
 
-  Serial.print("WiFi Connected. IP: ");
+  Serial.print("[WiFi] Connected. IP: ");
   Serial.println(WiFi.localIP());
 }
 
@@ -178,12 +228,21 @@ import machine
 import urequests
 import ujson
 
-# ========== CONFIG ==========
+# =========================
+# PumpPilot ESP32 MicroPython
+# =========================
+
+# ---------- CONFIG ----------
 WIFI_SSID = "YOUR_WIFI_NAME"
 WIFI_PASS = "YOUR_WIFI_PASSWORD"
 
-MOTOR_PIN = 23
-LOAD_PIN = 34
+MOTOR_PIN = 2
+LOAD_PIN = 4
+DEVICE_PIN = 5
+
+# Set 1 if signal is ACTIVE LOW, else 0
+LOAD_ACTIVE_LOW = 0
+DEVICE_READY_ACTIVE_LOW = 1
 
 POLL_INTERVAL_MS = 5000
 HTTP_TIMEOUT_MS = 6  # seconds
@@ -191,18 +250,26 @@ HTTP_TIMEOUT_MS = 6  # seconds
 ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}"
 API_HOST = "https://pms-two-kappa.vercel.app"
 
-# ========== SETUP ==========
+# ---------- SETUP ----------
 motor = machine.Pin(MOTOR_PIN, machine.Pin.OUT)
 load_pin = machine.Pin(LOAD_PIN, machine.Pin.IN, machine.Pin.PULL_UP)
+device_pin = machine.Pin(DEVICE_PIN, machine.Pin.IN, machine.Pin.PULL_UP)
 
 last_poll = 0
 
-
-# ========== FUNCTIONS ==========
+# ---------- FUNCTIONS ----------
 
 def set_motor(on):
     motor.value(1 if on else 0)
     print("[LED]", "ON" if on else "OFF")
+
+def read_load_shedding():
+    raw = load_pin.value()
+    return (raw == 0) if LOAD_ACTIVE_LOW else (raw == 1)
+
+def read_device_ready():
+    raw = device_pin.value()
+    return (raw == 0) if DEVICE_READY_ACTIVE_LOW else (raw == 1)
 
 
 def connect_wifi():
@@ -213,14 +280,14 @@ def connect_wifi():
         print("Connecting to WiFi...")
         wlan.connect(WIFI_SSID, WIFI_PASS)
 
-        timeout = 8
+        timeout_sec = 10
         start = time.time()
 
         while not wlan.isconnected():
-            if time.time() - start > timeout:
+            if (time.time() - start) > timeout_sec:
                 print("WiFi Failed. Restarting...")
                 machine.reset()
-            time.sleep(0.2)
+            time.sleep(0.25)
 
     print("WiFi Connected:", wlan.ifconfig())
     return wlan
@@ -228,20 +295,31 @@ def connect_wifi():
 
 def ensure_wifi(wlan):
     if not wlan.isconnected():
+        print("[WiFi] reconnecting...")
         wlan.disconnect()
         wlan.connect(WIFI_SSID, WIFI_PASS)
+        t0 = time.time()
+        while not wlan.isconnected() and (time.time() - t0) < 10:
+            time.sleep(0.25)
+        print("[WiFi] ok" if wlan.isconnected() else "[WiFi] reconnect failed")
 
 
 def poll_server(wlan):
     if not wlan.isconnected():
         return
 
-    local_ls = (load_pin.value() == 1)
+    raw_ls = load_pin.value()
+    raw_dev = device_pin.value()
+    local_ls = read_load_shedding()
+    local_dev = read_device_ready()
 
-    url = "{}/api/esp32/poll?adminId={}&ls={}".format(
+    print("[PIN] loadRaw={} devRaw={} ls={} dev={}".format(raw_ls, raw_dev, local_ls, local_dev))
+
+    url = "{}/api/esp32/poll?adminId={}&ls={}&dev={}".format(
         API_HOST,
         ADMIN_ID,
-        "1" if local_ls else "0"
+        "1" if local_ls else "0",
+        "1" if local_dev else "0",
     )
 
     try:
@@ -259,23 +337,26 @@ def poll_server(wlan):
 
         status = doc.get("motorStatus", "OFF")
         load_shedding = doc.get("loadShedding", False)
+        backend_dev = doc.get("deviceReady", False)
         admin_name = doc.get("adminName", "unknown")
 
-        print("[POLL] admin={} status={} ls={} localLS={}".format(
+        print("[POLL] admin={} status={} ls={} localLS={} dev={} backendDev={}".format(
             admin_name,
             status,
             load_shedding,
-            local_ls
+            local_ls,
+            local_dev,
+            backend_dev
         ))
 
-        turn_on = (status == "RUNNING") and (not load_shedding) and (not local_ls)
+        turn_on = (status == "RUNNING") and (not load_shedding) and (not local_ls) and local_dev
         set_motor(turn_on)
 
     except Exception as e:
         print("[ERROR]", e)
 
 
-# ========== MAIN ==========
+# ---------- MAIN ----------
 wlan = connect_wifi()
 
 while True:
@@ -295,16 +376,37 @@ while True:
 #include <ESP8266HTTPClient.h>
 #include <ArduinoJson.h>
 
-#define MOTOR_PIN 23
-#define LOAD_PIN 34
+// =========================
+// PumpPilot ESP8266 Firmware
+// =========================
+
+// NodeMCU example:
+// D4=GPIO2, D2=GPIO4, D1=GPIO5
+#define MOTOR_PIN 2
+#define LOAD_PIN 4
+#define DEVICE_PIN 5
+
+// Set 1 if signal is ACTIVE LOW, else 0
+#define LOAD_ACTIVE_LOW 0
+#define DEVICE_READY_ACTIVE_LOW 1
 
 #define POLL_INTERVAL_MS 5000
-#define HTTP_TIMEOUT_MS 6000
+#define HTTP_TIMEOUT_MS 8000
 
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
 const char* API_HOST = "https://pms-two-kappa.vercel.app";
 
 unsigned long lastPoll = 0;
+
+bool readLoadSheddingPin() {
+  int raw = digitalRead(LOAD_PIN);
+  return LOAD_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+}
+
+bool readDeviceReadyPin() {
+  int raw = digitalRead(DEVICE_PIN);
+  return DEVICE_READY_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+}
 
 void setMotor(bool on) {
   digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
@@ -314,11 +416,12 @@ void setMotor(bool on) {
 void ensureWiFi() {
   if (WiFi.status() == WL_CONNECTED) return;
 
+  Serial.println("[WiFi] Reconnecting...");
   WiFi.reconnect();
 
   unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 8000) {
-    delay(200);
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
+    delay(250);
     Serial.print(".");
   }
   Serial.println();
@@ -327,16 +430,26 @@ void ensureWiFi() {
 void pollServer() {
   if (WiFi.status() != WL_CONNECTED) return;
 
-  bool localLS = (digitalRead(LOAD_PIN) == HIGH);
+  bool localLS = readLoadSheddingPin();
+  bool localDeviceReady = readDeviceReadyPin();
+
+  Serial.printf("[PIN] loadRaw=%d devRaw=%d ls=%d dev=%d\\n",
+                digitalRead(LOAD_PIN),
+                digitalRead(DEVICE_PIN),
+                localLS,
+                localDeviceReady);
 
   std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
-  client->setInsecure();
+  client->setInsecure(); // quick test; use certificate pinning for hardened security
 
   HTTPClient http;
 
-  String url = String(API_HOST) + "/api/esp32/poll?adminId=" + ADMIN_ID +
-               "&ls=" + (localLS ? "1" : "0");
+  String url = String(API_HOST) +
+               "/api/esp32/poll?adminId=" + ADMIN_ID +
+               "&ls=" + (localLS ? "1" : "0") +
+               "&dev=" + (localDeviceReady ? "1" : "0");
 
+  http.setConnectTimeout(HTTP_TIMEOUT_MS);
   http.setTimeout(HTTP_TIMEOUT_MS);
 
   if (!http.begin(*client, url)) {
@@ -347,7 +460,7 @@ void pollServer() {
   int code = http.GET();
 
   if (code != HTTP_CODE_OK) {
-    Serial.printf("[HTTP] code=%d\\n", code);
+    Serial.printf("[HTTP] code=%d err=%s\\n", code, http.errorToString(code).c_str());
     http.end();
     return;
   }
@@ -365,12 +478,13 @@ void pollServer() {
 
   const char* status = doc["motorStatus"] | "OFF";
   bool loadShedding = doc["loadShedding"] | false;
+  bool backendDeviceReady = doc["deviceReady"] | false;
   const char* adminName = doc["adminName"] | "unknown";
 
-  Serial.printf("[POLL] admin=%s status=%s ls=%d localLS=%d\\n",
-                adminName, status, loadShedding, localLS);
+  Serial.printf("[POLL] admin=%s status=%s ls=%d localLS=%d dev=%d backendDev=%d\\n",
+                adminName, status, loadShedding, localLS, localDeviceReady, backendDeviceReady);
 
-  bool turnOn = (strcmp(status, "RUNNING") == 0) && !loadShedding && !localLS;
+  bool turnOn = (strcmp(status, "RUNNING") == 0) && !loadShedding && !localLS && localDeviceReady;
 
   setMotor(turnOn);
 }
@@ -382,6 +496,7 @@ void setup() {
   digitalWrite(MOTOR_PIN, LOW);
 
   pinMode(LOAD_PIN, INPUT_PULLUP);
+  pinMode(DEVICE_PIN, INPUT_PULLUP);
 
   WiFiManager wm;
   wm.setConfigPortalTimeout(180);
@@ -425,6 +540,7 @@ void loop() {
 // Motor System
 #define MOTOR_PIN 25
 #define LOAD_PIN 35
+#define DEVICE_PIN 34
 
 #define POLL_INTERVAL_MS 5000
 
@@ -469,7 +585,8 @@ void pollServer() {
   }
 
   bool localLS = (digitalRead(LOAD_PIN) == HIGH);
-  String url = String("/api/esp32/poll?adminId=") + ADMIN_ID + "&ls=" + (localLS ? "1" : "0");
+  bool localDeviceReady = (digitalRead(DEVICE_PIN) == HIGH);
+  String url = String("/api/esp32/poll?adminId=") + ADMIN_ID + "&ls=" + (localLS ? "1" : "0") + "&dev=" + (localDeviceReady ? "1" : "0");
 
   if (!client.connect(SERVER, PORT)) {
     SerialMon.println("Connection failed");
@@ -513,9 +630,9 @@ void pollServer() {
   bool loadShedding = doc["loadShedding"] | false;
   const char* adminName = doc["adminName"] | "unknown";
 
-  Serial.printf("[POLL] admin=%s status=%s ls=%d localLS=%d\\n", adminName, status, loadShedding, localLS);
+  Serial.printf("[POLL] admin=%s status=%s ls=%d localLS=%d dev=%d\\n", adminName, status, loadShedding, localLS, localDeviceReady);
 
-  bool turnOn = (strcmp(status, "RUNNING") == 0) && !loadShedding && !localLS;
+  bool turnOn = (strcmp(status, "RUNNING") == 0) && !loadShedding && !localLS && localDeviceReady;
   setMotor(turnOn);
 }
 
@@ -526,6 +643,7 @@ void setup() {
   pinMode(MOTOR_PIN, OUTPUT);
   digitalWrite(MOTOR_PIN, LOW);
   pinMode(LOAD_PIN, INPUT_PULLUP);
+  pinMode(DEVICE_PIN, INPUT_PULLUP);
 
   pinMode(MODEM_PWRKEY, OUTPUT);
   pinMode(MODEM_RST, OUTPUT);
@@ -575,8 +693,11 @@ void loop() {
       const reqJson = await reqRes.json();
       setUsers(usersJson.users ?? []);
       setQueue(activityJson.queue ?? []);
-      if (statusRes.ok && statusJson.admin?.loadShedding !== undefined) {
+      if (statusRes.ok && statusJson.admin) {
         setLoadShedding(!!statusJson.admin.loadShedding);
+        setDeviceReady(Boolean(statusJson.admin.deviceReady));
+        setAdminStatus(statusJson.admin.status ?? "active");
+        setAdminSuspendReason(statusJson.admin.suspendReason ?? null);
       }
       if (reqRes.ok) setRequests(reqJson.requests ?? []);
     } catch (err: any) {
@@ -697,6 +818,34 @@ void loop() {
     }
   };
 
+  const handleStartMotor = async (userId: string, requestedMinutes: number) => {
+    setError(null);
+    setStatusMessage(null);
+    setStartLoadingUserId(userId);
+    try {
+      const res = await fetch("/api/motor/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, requestedMinutes }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error || "Failed to start motor");
+        return;
+      }
+      if (json.status === "WAITING") {
+        setStatusMessage(`User queued at position #${json.queuePosition ?? "-"}`);
+      } else {
+        setStatusMessage("User motor started");
+      }
+      await loadData();
+    } catch (err: any) {
+      setError(err instanceof Error ? err.message : "Failed to start motor");
+    } finally {
+      setStartLoadingUserId(null);
+    }
+  };
+
   const handleSuspendUser = async (userId: string) => {
     setError(null);
     setSuspendError(null);
@@ -779,12 +928,12 @@ void loop() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Link
-              href="/logs"
+            <a
+              href="/api/history?format=csv&download=1&limit=200"
               className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
             >
-              Logs
-            </Link>
+              Download History
+            </a>
             <button
               onClick={() => signOut({ callbackUrl: "/admin/login" })}
               className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
@@ -813,6 +962,16 @@ void loop() {
         {loadShedding && (
           <div className="rounded-xl border border-amber-500/40 bg-amber-900/30 px-4 py-3 text-sm text-amber-100 shadow-lg shadow-amber-900/30">
             Warning: load shedding active. Some actions are paused.
+          </div>
+        )}
+        {!loadShedding && deviceReady === false && (
+          <div className="rounded-xl border border-amber-500/40 bg-amber-900/30 px-4 py-3 text-sm text-amber-100 shadow-lg shadow-amber-900/30">
+            Device status LOW: your ESP32 device is not ready.
+          </div>
+        )}
+        {adminStatus === "suspended" && (
+          <div className="rounded-xl border border-red-500/40 bg-red-900/30 px-4 py-3 text-sm text-red-100 shadow-lg shadow-red-900/30">
+            You are suspended{adminSuspendReason ? `: ${adminSuspendReason}` : ""}.
           </div>
         )}
 
@@ -910,6 +1069,19 @@ void loop() {
                     {u.suspendReason ? ` (${u.suspendReason})` : ""}
                   </td>
                     <td className="px-2 py-2">
+                      <button
+                        onClick={() => handleStartMotor(u._id, (u.motorRunningTime && u.motorRunningTime > 0) ? u.motorRunningTime : 5)}
+                        disabled={
+                          startLoadingUserId === u._id ||
+                          adminStatus !== "active" ||
+                          Boolean(loadShedding) ||
+                          deviceReady === false ||
+                          u.status === "suspended"
+                        }
+                        className="rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-800/50 disabled:opacity-60"
+                      >
+                        {startLoadingUserId === u._id ? "Starting..." : "Start Motor"}
+                      </button>
                       <button
                         onClick={() => handleStopResetMotor(u._id)}
                         disabled={stopResetLoadingUserId === u._id}

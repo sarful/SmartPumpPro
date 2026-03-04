@@ -14,6 +14,7 @@
 // ===== PIN CONFIG =====
 #define MOTOR_PIN 2       // Change to your relay GPIO (2 = onboard LED)
 #define LOAD_PIN  4       // HIGH = local load shedding; keep if you have sensor
+#define DEVICE_PIN 5      // HIGH = device ready
 
 // ===== TIMING =====
 #define POLL_INTERVAL_MS 5000
@@ -50,12 +51,14 @@ void pollServer() {
   if (WiFi.status() != WL_CONNECTED) return;
 
   bool localLS = digitalRead(LOAD_PIN) == HIGH;
+  bool localDeviceReady = digitalRead(DEVICE_PIN) == HIGH;
 
   WiFiClient client;
   HTTPClient http;
 
   String url = String(API_HOST) + "/api/esp32/poll?adminId=" + ADMIN_ID +
-               "&ls=" + (localLS ? "1" : "0");
+               "&ls=" + (localLS ? "1" : "0") +
+               "&dev=" + (localDeviceReady ? "1" : "0");
 
   http.setTimeout(HTTP_TIMEOUT_MS);
   if (!http.begin(client, url)) {
@@ -84,12 +87,13 @@ void pollServer() {
   bool loadSheddingServer  = doc["loadShedding"] | false;
   const char* adminName    = doc["adminName"] | "unknown";
 
-  Serial.printf("[POLL] admin=%s status=%s lsServer=%d lsLocal=%d\n",
-                adminName, status, loadSheddingServer, localLS);
+  Serial.printf("[POLL] admin=%s status=%s lsServer=%d lsLocal=%d dev=%d\n",
+                adminName, status, loadSheddingServer, localLS, localDeviceReady);
 
   bool turnOn = strcmp(status, "RUNNING") == 0 &&
                 !loadSheddingServer &&
-                !localLS;
+                !localLS &&
+                localDeviceReady;
   setMotor(turnOn);
 }
 
@@ -99,6 +103,7 @@ void setup() {
   pinMode(MOTOR_PIN, OUTPUT);
   digitalWrite(MOTOR_PIN, LOW);
   pinMode(LOAD_PIN, INPUT_PULLUP);
+  pinMode(DEVICE_PIN, INPUT_PULLUP);
 
   Serial.println("\n=== PumpPilot (Universal) ===");
 

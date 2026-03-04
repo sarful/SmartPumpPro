@@ -4,6 +4,7 @@ import User from '@/models/User';
 import { addToQueue, getQueuePosition, isMotorBusy } from '@/lib/queue-engine';
 import { auth } from '@/lib/auth';
 import Admin from '@/models/Admin';
+import { isDeviceReadyEffective } from '@/lib/device-readiness';
 
 type StartMotorRequestBody = {
   userId?: string;
@@ -54,12 +55,20 @@ export async function POST(req: NextRequest) {
     }
 
     if (user.status === 'suspended') {
-      return NextResponse.json({ error: 'User is suspended' }, { status: 403 });
+      return NextResponse.json({ error: user.suspendReason || 'You are suspended' }, { status: 403 });
     }
 
-    const admin = await Admin.findById(user.adminId).select({ status: 1, suspendReason: 1 }).lean();
+    const admin = await Admin.findById(user.adminId)
+      .select({ status: 1, suspendReason: 1, loadShedding: 1, deviceReady: 1, deviceLastSeenAt: 1 })
+      .lean();
     if (admin && admin.status === 'suspended') {
-      return NextResponse.json({ error: admin.suspendReason || 'Admin suspended' }, { status: 403 });
+      return NextResponse.json({ error: admin.suspendReason || 'You are suspended by admin/master' }, { status: 403 });
+    }
+    if (admin?.loadShedding) {
+      return NextResponse.json({ error: 'Load shedding active now' }, { status: 403 });
+    }
+    if (!isDeviceReadyEffective(admin)) {
+      return NextResponse.json({ error: 'Your device is not ready' }, { status: 403 });
     }
 
     if (user.availableMinutes < requestedMinutes) {

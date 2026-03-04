@@ -11,7 +11,7 @@ export async function GET(_req: NextRequest) {
   }
   await connectDB();
   const admin = await Admin.findById(session.user.adminId)
-    .select({ status: 1, suspendReason: 1, username: 1 })
+    .select({ status: 1, suspendReason: 1, username: 1, loadShedding: 1, deviceReady: 1, devicePinHigh: 1, deviceLastSeenAt: 1 })
     .lean();
   if (!admin) return NextResponse.json({ error: 'Admin not found' }, { status: 404 });
   const userCount = await User.countDocuments({ adminId: session.user.adminId });

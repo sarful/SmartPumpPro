@@ -1,27 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Types } from "mongoose";
+import { auth } from "@/lib/auth";
 import { connectDB } from "@/lib/mongodb";
-import { getMobileAccessPayload } from "@/lib/mobile-request-auth";
-import { addToQueue, getQueuePosition } from "@/lib/queue-engine";
-import { calculateUsedMinutes, stopMotorForUser } from "@/lib/timer-engine";
+import User from "@/models/User";
 import Admin from "@/models/Admin";
 import Queue from "@/models/Queue";
-import User from "@/models/User";
+import { addToQueue, getQueuePosition } from "@/lib/queue-engine";
+import { calculateUsedMinutes, stopMotorForUser } from "@/lib/timer-engine";
 import { isDeviceReadyEffective } from "@/lib/device-readiness";
 
 type Body = {
   userId?: string;
-  action?: "suspend" | "unsuspend" | "delete" | "stop_reset" | "stop-reset" | "start";
+  action?: "start" | "stop_reset" | "stop-reset";
   requestedMinutes?: number;
-  reason?: string;
 };
 
 export async function POST(req: NextRequest) {
   try {
-    const payload = getMobileAccessPayload(req);
-    if (!payload) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    if (payload.role !== "master") {
-      return NextResponse.json({ error: "Only master role is allowed" }, { status: 403 });
+    const session = await auth();
+    if (!session || session.user.role !== "master") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     let body: Body;
@@ -31,41 +28,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
-    const { userId, action, requestedMinutes, reason } = body ?? {};
-    if (!userId || !Types.ObjectId.isValid(userId)) {
-      return NextResponse.json({ error: "Valid userId is required" }, { status: 400 });
-    }
+    const { userId, requestedMinutes } = body ?? {};
+    const action = body?.action === "stop-reset" ? "stop_reset" : body?.action;
+
+    if (!userId) return NextResponse.json({ error: "userId is required" }, { status: 400 });
     if (!action) return NextResponse.json({ error: "action is required" }, { status: 400 });
 
-    // Backward-compatible aliases from older/mobile cached builds
-    const normalizedAction = action === "stop-reset" ? "stop_reset" : action;
-
     await connectDB();
+    const user = await User.findById(userId);
+    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-    if (normalizedAction === "suspend") {
-      const updated = await User.findOneAndUpdate(
-        { _id: userId },
-        { status: "suspended", suspendReason: reason || "Suspended by master" },
-        { new: true },
-      ).lean();
-      if (!updated) return NextResponse.json({ error: "User not found" }, { status: 404 });
-      return NextResponse.json({ success: true });
-    }
-
-    if (normalizedAction === "unsuspend") {
-      const updated = await User.findOneAndUpdate(
-        { _id: userId },
-        { status: "active", suspendReason: null },
-        { new: true },
-      ).lean();
-      if (!updated) return NextResponse.json({ error: "User not found" }, { status: 404 });
-      return NextResponse.json({ success: true });
-    }
-
-    if (normalizedAction === "stop_reset") {
-      const user = await User.findById(userId);
-      if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
-
+    if (action === "stop_reset") {
       if (user.motorStatus === "RUNNING" || user.motorStatus === "HOLD") {
         const usedMinutes = calculateUsedMinutes(user.motorStartTime, user.lastSetMinutes);
         const remaining =
@@ -103,9 +76,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (normalizedAction === "start") {
-      const user = await User.findById(userId);
-      if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (action === "start") {
       if (user.status === "suspended") {
         return NextResponse.json({ error: user.suspendReason || "You are suspended" }, { status: 403 });
       }
@@ -146,15 +117,9 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (normalizedAction === "delete") {
-      const deleted = await User.deleteOne({ _id: userId });
-      if (!deleted.deletedCount) return NextResponse.json({ error: "User not found" }, { status: 404 });
-      return NextResponse.json({ success: true });
-    }
-
     return NextResponse.json({ error: "Unsupported action" }, { status: 400 });
   } catch (error) {
-    console.error("mobile master user action error", error);
-    return NextResponse.json({ error: "Failed to process user action" }, { status: 500 });
+    console.error("master motor action error", error);
+    return NextResponse.json({ error: "Failed to process motor action" }, { status: 500 });
   }
 }

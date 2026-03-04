@@ -11,6 +11,8 @@ type AdminLean = {
   username?: string;
   status?: string;
   loadShedding?: boolean;
+  deviceReady?: boolean;
+  devicePinHigh?: boolean;
   suspendReason?: string | null;
 };
 
@@ -39,7 +41,9 @@ export async function GET(req: NextRequest) {
       User.countDocuments({}),
       Queue.countDocuments({ status: "RUNNING" }),
       Queue.countDocuments({ status: "WAITING" }),
-      Admin.find({}).select({ username: 1, status: 1, loadShedding: 1, suspendReason: 1 }).lean(),
+      Admin.find({})
+        .select({ username: 1, status: 1, loadShedding: 1, deviceReady: 1, devicePinHigh: 1, suspendReason: 1 })
+        .lean(),
       User.find({})
         .select({
           username: 1,
@@ -79,6 +83,8 @@ export async function GET(req: NextRequest) {
       username: admin.username,
       status: admin.status,
       loadShedding: Boolean(admin.loadShedding),
+      deviceReady: Boolean(admin.deviceReady),
+      devicePinHigh: Boolean(admin.devicePinHigh),
       suspendReason: admin.suspendReason ?? null,
     }));
 

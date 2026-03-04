@@ -2,11 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
-import Link from "next/link";
 
-type AdminRow = { _id: string; username: string; status: string; loadShedding?: boolean; suspendReason?: string };
-type UserRow = { _id: string; username: string; adminId: string; adminName?: string; availableMinutes: number; motorStatus: string; status?: string; suspendReason?: string };
-type UserWithAdmin = { _id: string; username: string; adminId: string; adminName?: string; status?: string; suspendReason?: string };
+type AdminRow = {
+  _id: string;
+  username: string;
+  status: string;
+  loadShedding?: boolean;
+  deviceReady?: boolean;
+  deviceOnline?: boolean;
+  devicePinHigh?: boolean;
+  suspendReason?: string;
+};
+type UserRow = { _id: string; username: string; adminId: string; adminName?: string; availableMinutes: number; motorStatus: string; motorRunningTime?: number; status?: string; suspendReason?: string };
+type UserWithAdmin = { _id: string; username: string; adminId: string; adminName?: string; availableMinutes?: number; motorStatus?: string; motorRunningTime?: number; status?: string; suspendReason?: string };
 
 export default function MasterDashboardPage() {
   const { data: session, status } = useSession();
@@ -20,6 +28,7 @@ export default function MasterDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copiedAdminId, setCopiedAdminId] = useState<string | null>(null);
+  const [minuteDrafts, setMinuteDrafts] = useState<Record<string, string>>({});
   const [manualAdminApproval, setManualAdminApproval] = useState(true);
   const [savingApprovalMode, setSavingApprovalMode] = useState(false);
 
@@ -198,6 +207,54 @@ export default function MasterDashboardPage() {
     loadData();
   };
 
+  const rechargeUserMinutes = async (id: string, minutes: number) => {
+    setError(null);
+    const res = await fetch("/api/master/users/minutes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: id, action: "recharge", minutes }),
+    });
+    const json = await res.json();
+    if (!res.ok) return setError(json.error || "Recharge failed");
+    loadData();
+  };
+
+  const setUserAvailableMinutes = async (id: string, minutes: number) => {
+    setError(null);
+    const res = await fetch("/api/master/users/minutes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: id, action: "set", minutes }),
+    });
+    const json = await res.json();
+    if (!res.ok) return setError(json.error || "Set available minutes failed");
+    loadData();
+  };
+
+  const startUserMotor = async (id: string, requestedMinutes?: number) => {
+    setError(null);
+    const res = await fetch("/api/master/users/motor-action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: id, action: "start", requestedMinutes }),
+    });
+    const json = await res.json();
+    if (!res.ok) return setError(json.error || "Start motor failed");
+    loadData();
+  };
+
+  const stopResetUserMotor = async (id: string) => {
+    setError(null);
+    const res = await fetch("/api/master/users/motor-action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: id, action: "stop_reset" }),
+    });
+    const json = await res.json();
+    if (!res.ok) return setError(json.error || "Stop/reset failed");
+    loadData();
+  };
+
   if (status === "loading") return <div className="p-6 text-slate-600">Loading session...</div>;
   if (!isMaster) {
     return (
@@ -228,12 +285,12 @@ export default function MasterDashboardPage() {
             <p className="text-sm text-slate-600">Create, approve, suspend and delete admins and users.</p>
           </div>
           <div className="flex items-center gap-2">
-            <Link
-              href="/logs"
+            <a
+              href="/api/history?format=csv&download=1&limit=200"
               className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-slate-400 hover:text-slate-900"
             >
-              Logs
-            </Link>
+              Download History
+            </a>
             <button
               onClick={() => signOut({ callbackUrl: "/admin/login" })}
               className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-slate-400 hover:text-slate-900"
@@ -305,6 +362,10 @@ export default function MasterDashboardPage() {
                   </button>
                 </div>
                 <div className="text-slate-600 text-xs">Load: {ad.loadShedding ? "ON" : "OFF"}</div>
+                <div className="text-slate-600 text-xs">
+                  Device: {ad.deviceReady ? "READY" : "NOT READY"}
+                  {ad.deviceOnline === false ? " (OFFLINE)" : ""}
+                </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {ad.status === "suspended" ? (
                     <button
@@ -341,11 +402,56 @@ export default function MasterDashboardPage() {
               <div key={u._id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900">
                 <div className="font-semibold">{u.username}</div>
                 <div className="text-slate-600 text-xs">Admin: {u.adminName ?? u.adminId}</div>
+                <div className="text-slate-600 text-xs">Balance: {u.availableMinutes ?? 0} m</div>
+                <div className="text-slate-600 text-xs">Motor: {u.motorStatus ?? "OFF"}</div>
+                <div className="text-slate-600 text-xs">Running Time: {u.motorRunningTime ?? 0} m</div>
                 <div className="text-slate-600 text-xs">
                   Status: {u.status ?? "active"}
                   {u.suspendReason ? ` (${u.suspendReason})` : ""}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    className="w-28 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900"
+                    placeholder="minutes"
+                    value={minuteDrafts[u._id] ?? String(u.availableMinutes ?? 0)}
+                    onChange={(e) =>
+                      setMinuteDrafts((prev) => ({ ...prev, [u._id]: e.target.value }))
+                    }
+                  />
+                  <button
+                    onClick={() => {
+                      const value = Number(minuteDrafts[u._id] ?? u.availableMinutes ?? 0);
+                      if (!Number.isFinite(value) || value <= 0) return setError("Recharge minutes must be > 0");
+                      rechargeUserMinutes(u._id, value);
+                    }}
+                    className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs text-emerald-700 hover:bg-emerald-100"
+                  >
+                    Recharge
+                  </button>
+                  <button
+                    onClick={() => {
+                      const value = Number(minuteDrafts[u._id] ?? u.availableMinutes ?? 0);
+                      if (!Number.isFinite(value) || value < 0) return setError("Set minutes must be >= 0");
+                      setUserAvailableMinutes(u._id, Math.floor(value));
+                    }}
+                    className="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1 text-xs text-indigo-700 hover:bg-indigo-100"
+                  >
+                    Set Balance
+                  </button>
+                  <button
+                    onClick={() => startUserMotor(u._id, u.motorRunningTime && u.motorRunningTime > 0 ? u.motorRunningTime : 5)}
+                    className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-1 text-xs text-blue-700 hover:bg-blue-100"
+                  >
+                    Start Motor
+                  </button>
+                  <button
+                    onClick={() => stopResetUserMotor(u._id)}
+                    className="rounded-lg border border-slate-300 bg-slate-100 px-3 py-1 text-xs text-slate-800 hover:bg-slate-200"
+                  >
+                    Stop/Reset
+                  </button>
                   {u.status === "suspended" ? (
                     <button
                       onClick={() => unsuspendUser(u._id)}
@@ -443,97 +549,6 @@ export default function MasterDashboardPage() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-sm text-slate-600">Admins</div>
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-slate-500">
-                <tr>
-                  <th className="px-2 py-2 text-left">Username</th>
-                  <th className="px-2 py-2 text-left">Status</th>
-                  <th className="px-2 py-2 text-left">Load Shedding</th>
-                  <th className="px-2 py-2 text-left">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 text-slate-900">
-                {admins.map((a) => (
-                  <tr key={a._id}>
-                    <td className="px-2 py-2">{a.username}</td>
-                    <td className="px-2 py-2">{a.status}</td>
-                    <td className="px-2 py-2">{a.loadShedding ? "ON" : "OFF"}</td>
-                    <td className="px-2 py-2">
-                      <div className="flex gap-2">
-                        {a.status === "pending" && (
-                          <button
-                            onClick={() => approveAdmin(a._id)}
-                            className="rounded-lg bg-emerald-600 px-2 py-1 text-xs font-semibold text-white hover:bg-emerald-500"
-                          >
-                            Approve
-                          </button>
-                        )}
-                        <button
-                          onClick={() => deleteAdmin(a._id)}
-                          className="rounded-lg border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {admins.length === 0 && (
-                  <tr>
-                    <td className="px-2 py-3 text-slate-500" colSpan={4}>
-                      No admins found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-sm text-slate-600">Users</div>
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-slate-500">
-                <tr>
-                  <th className="px-2 py-2 text-left">Username</th>
-                  <th className="px-2 py-2 text-left">Admin</th>
-                  <th className="px-2 py-2 text-left">Available</th>
-                  <th className="px-2 py-2 text-left">Motor</th>
-                  <th className="px-2 py-2 text-left">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 text-slate-900">
-                {users.map((u) => (
-                  <tr key={u._id}>
-                    <td className="px-2 py-2">{u.username}</td>
-                    <td className="px-2 py-2">{u.adminName ?? u.adminId}</td>
-                    <td className="px-2 py-2">{u.availableMinutes} m</td>
-                    <td className="px-2 py-2">{u.motorStatus}</td>
-                    <td className="px-2 py-2">
-                      <button
-                        onClick={() => deleteUser(u._id)}
-                        className="rounded-lg border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {users.length === 0 && (
-                  <tr>
-                    <td className="px-2 py-3 text-slate-500" colSpan={5}>
-                      No users found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
       </div>
     </div>
   );

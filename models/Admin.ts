@@ -6,6 +6,9 @@ export interface AdminDocument extends mongoose.Document {
   status: 'pending' | 'active' | 'suspended';
   createdBy?: Types.ObjectId;
   loadShedding: boolean;
+  deviceReady: boolean;
+  devicePinHigh?: boolean;
+  deviceLastSeenAt?: Date | null;
   createdAt: Date;
   suspendReason?: string;
 }
@@ -36,6 +39,18 @@ const adminSchema = new Schema<AdminDocument>(
     loadShedding: {
       type: Boolean,
       default: false,
+    },
+    deviceReady: {
+      type: Boolean,
+      default: false,
+    },
+    devicePinHigh: {
+      type: Boolean,
+      default: false,
+    },
+    deviceLastSeenAt: {
+      type: Date,
+      default: null,
     },
     createdAt: {
       type: Date,

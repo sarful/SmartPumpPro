@@ -5,6 +5,7 @@ import Admin from "@/models/Admin";
 import User from "@/models/User";
 import MinuteRequest from "@/models/MinuteRequest";
 import Queue from "@/models/Queue";
+import { isDeviceOnline, isDeviceReadyEffective } from "@/lib/device-readiness";
 
 type UserLean = {
   _id: unknown;
@@ -56,7 +57,7 @@ export async function GET(req: NextRequest) {
     await connectDB();
 
     const admin = await Admin.findById(adminId)
-      .select({ username: 1, status: 1, suspendReason: 1, loadShedding: 1 })
+      .select({ username: 1, status: 1, suspendReason: 1, loadShedding: 1, deviceReady: 1, devicePinHigh: 1, deviceLastSeenAt: 1 })
       .lean();
     if (!admin) return NextResponse.json({ error: "Admin not found" }, { status: 404 });
 
@@ -90,6 +91,10 @@ export async function GET(req: NextRequest) {
         status: admin.status,
         suspendReason: admin.suspendReason ?? null,
         loadShedding: Boolean(admin.loadShedding),
+        deviceReady: isDeviceReadyEffective(admin),
+        deviceOnline: isDeviceOnline(admin.deviceLastSeenAt),
+        devicePinHigh: Boolean(admin.devicePinHigh),
+        deviceLastSeenAt: admin.deviceLastSeenAt ?? null,
       },
       users: (users as UserLean[]).map((u) => ({
         id: String(u._id),
