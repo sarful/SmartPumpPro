@@ -53,7 +53,7 @@ export default function AdminDashboardPage() {
   const [stopResetLoadingUserId, setStopResetLoadingUserId] = useState<string | null>(null);
   const [startLoadingUserId, setStartLoadingUserId] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
-  const [espCodeType, setEspCodeType] = useState<"arduino" | "micropython" | "esp8266" | "ttgo">("arduino");
+  const [espCodeType, setEspCodeType] = useState<"arduino" | "micropython" | "esp8266" | "ttgo" | "stm32">("arduino");
 
   const isAdmin = session?.user?.role === "admin";
   const adminId = session?.user?.adminId ?? "";
@@ -523,31 +523,37 @@ void loop() {
 }`;
 
   const ttgoTCallCode = `#define TINY_GSM_MODEM_SIM800
+#define TINY_GSM_RX_BUFFER 1024
 
 #include <TinyGsmClient.h>
 #include <ArduinoJson.h>
 
 #define SerialMon Serial
-#define SerialAT Serial1
+#define SerialAT  Serial1
 
-// SIM800 Pins (ESP32)
-#define MODEM_TX 27
-#define MODEM_RX 26
-#define MODEM_RST 18
-#define MODEM_PWRKEY 19
+// ---------- TTGO T-Call pins ----------
+#define MODEM_TX       27
+#define MODEM_RX       26
+#define MODEM_PWRKEY   4
 #define MODEM_POWER_ON 23
+#define MODEM_RST      5
 
-// Motor System
-#define MOTOR_PIN 25
-#define LOAD_PIN 35
-#define DEVICE_PIN 34
+// ---------- Motor / Input pins ----------
+#define MOTOR_PIN   25
+#define LOAD_PIN    34
+#define DEVICE_PIN  35
 
-#define POLL_INTERVAL_MS 5000
+// ---------- Signal polarity ----------
+#define LOAD_ACTIVE_LOW          0
+#define DEVICE_READY_ACTIVE_LOW  1
 
-const char apn[]  = "internet";
-const char user[] = "";
-const char pass[] = "";
+#define POLL_INTERVAL_MS 5000UL
 
+const char apn[]      = "internet"; // update for your SIM operator APN
+const char gprsUser[] = "";
+const char gprsPass[] = "";
+
+// ---------- Admin-based config ----------
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
 const char* SERVER   = "pms-two-kappa.vercel.app";
 const int   PORT     = 80;
@@ -557,105 +563,158 @@ TinyGsmClient client(modem);
 
 unsigned long lastPoll = 0;
 
+bool readLoadShedding() {
+  int raw = digitalRead(LOAD_PIN);
+  return LOAD_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+}
+
+bool readDeviceReady() {
+  int raw = digitalRead(DEVICE_PIN);
+  return DEVICE_READY_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+}
+
 void setMotor(bool on) {
   digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
-  Serial.printf("[MOTOR] %s\\n", on ? "ON" : "OFF");
+  SerialMon.printf("[MOTOR] %s\\n", on ? "ON" : "OFF");
 }
 
-void connectGPRS() {
-  SerialMon.println("Connecting to network...");
-  if (!modem.waitForNetwork()) {
-    SerialMon.println("Network failed");
-    return;
+bool connectGprsIfNeeded() {
+  if (modem.isGprsConnected()) return true;
+
+  SerialMon.println("[NET] Waiting for network...");
+  if (!modem.waitForNetwork(60000L)) {
+    SerialMon.println("[NET] Network failed");
+    return false;
   }
 
-  SerialMon.println("Connecting GPRS...");
-  if (!modem.gprsConnect(apn, user, pass)) {
-    SerialMon.println("GPRS failed");
-    return;
+  SerialMon.println("[NET] Connecting GPRS...");
+  if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
+    SerialMon.println("[NET] GPRS failed");
+    return false;
   }
 
-  SerialMon.println("GPRS connected");
+  SerialMon.println("[NET] GPRS connected");
+  return true;
 }
 
-void pollServer() {
-  if (!modem.isGprsConnected()) {
-    connectGPRS();
-    return;
-  }
-
-  bool localLS = (digitalRead(LOAD_PIN) == HIGH);
-  bool localDeviceReady = (digitalRead(DEVICE_PIN) == HIGH);
-  String url = String("/api/esp32/poll?adminId=") + ADMIN_ID + "&ls=" + (localLS ? "1" : "0") + "&dev=" + (localDeviceReady ? "1" : "0");
-
-  if (!client.connect(SERVER, PORT)) {
-    SerialMon.println("Connection failed");
-    return;
-  }
-
-  client.print(String("GET ") + url + " HTTP/1.1\\r\\n");
-  client.print(String("Host: ") + SERVER + "\\r\\n");
-  client.print("Connection: close\\r\\n\\r\\n");
-
-  unsigned long timeout = millis();
+bool readHttpResponseBody(String& bodyOut) {
+  unsigned long t = millis();
   while (client.connected() && !client.available()) {
-    if (millis() - timeout > 10000) {
-      SerialMon.println("Timeout");
-      client.stop();
-      return;
+    if (millis() - t > 15000UL) {
+      SerialMon.println("[HTTP] Timeout waiting response");
+      return false;
     }
+    delay(10);
   }
 
-  String response = "";
+  String response;
   while (client.available()) {
     response += client.readString();
   }
   client.stop();
 
-  int jsonStart = response.indexOf("{");
+  int codeStart = response.indexOf("HTTP/1.1 ");
+  if (codeStart < 0) codeStart = response.indexOf("HTTP/1.0 ");
+  int statusCode = -1;
+  if (codeStart >= 0) {
+    statusCode = response.substring(codeStart + 9, codeStart + 12).toInt();
+  }
+
+  if (statusCode != 200) {
+    SerialMon.printf("[HTTP] Non-200: %d\\n", statusCode);
+    return false;
+  }
+
+  int jsonStart = response.indexOf('{');
   if (jsonStart < 0) {
-    SerialMon.println("Invalid JSON");
+    SerialMon.println("[HTTP] JSON not found");
+    return false;
+  }
+
+  bodyOut = response.substring(jsonStart);
+  return true;
+}
+
+void pollServer() {
+  if (!connectGprsIfNeeded()) return;
+
+  bool localLS = readLoadShedding();
+  bool localDev = readDeviceReady();
+
+  String path = "/api/esp32/poll?adminId=" + String(ADMIN_ID) +
+                "&ls=" + String(localLS ? "1" : "0") +
+                "&dev=" + String(localDev ? "1" : "0");
+
+  SerialMon.printf("[HTTP] GET %s\\n", path.c_str());
+
+  if (!client.connect(SERVER, PORT)) {
+    SerialMon.println("[HTTP] Connect failed");
     return;
   }
 
-  String json = response.substring(jsonStart);
-  StaticJsonDocument<512> doc;
-  DeserializationError err = deserializeJson(doc, json);
+  client.print(String("GET ") + path + " HTTP/1.1\\r\\n");
+  client.print(String("Host: ") + SERVER + "\\r\\n");
+  client.print("Connection: close\\r\\n\\r\\n");
+
+  String body;
+  if (!readHttpResponseBody(body)) return;
+
+  StaticJsonDocument<768> doc;
+  DeserializationError err = deserializeJson(doc, body);
   if (err) {
-    SerialMon.println("JSON parse error");
+    SerialMon.printf("[JSON] Parse error: %s\\n", err.c_str());
     return;
   }
 
-  const char* status = doc["motorStatus"] | "OFF";
-  bool loadShedding = doc["loadShedding"] | false;
+  const char* motorStatus = doc["motorStatus"] | "OFF";
+  bool backendLS = doc["loadShedding"] | false;
+  bool backendDev = doc["deviceReady"] | false;
   const char* adminName = doc["adminName"] | "unknown";
 
-  Serial.printf("[POLL] admin=%s status=%s ls=%d localLS=%d dev=%d\\n", adminName, status, loadShedding, localLS, localDeviceReady);
+  SerialMon.printf("[POLL] admin=%s status=%s ls=%d localLS=%d dev=%d backendDev=%d\\n",
+                   adminName, motorStatus, backendLS, localLS, localDev, backendDev);
 
-  bool turnOn = (strcmp(status, "RUNNING") == 0) && !loadShedding && !localLS && localDeviceReady;
+  bool turnOn = (strcmp(motorStatus, "RUNNING") == 0) &&
+                !backendLS &&
+                !localLS &&
+                localDev &&
+                backendDev;
+
   setMotor(turnOn);
+}
+
+void powerOnModem() {
+  pinMode(MODEM_POWER_ON, OUTPUT);
+  pinMode(MODEM_PWRKEY, OUTPUT);
+  pinMode(MODEM_RST, OUTPUT);
+
+  digitalWrite(MODEM_POWER_ON, HIGH);
+  digitalWrite(MODEM_RST, HIGH);
+
+  digitalWrite(MODEM_PWRKEY, LOW);
+  delay(1000);
+  digitalWrite(MODEM_PWRKEY, HIGH);
+  delay(2000);
+  digitalWrite(MODEM_PWRKEY, LOW);
 }
 
 void setup() {
   SerialMon.begin(115200);
-  delay(1000);
+  delay(300);
 
   pinMode(MOTOR_PIN, OUTPUT);
   digitalWrite(MOTOR_PIN, LOW);
   pinMode(LOAD_PIN, INPUT_PULLUP);
   pinMode(DEVICE_PIN, INPUT_PULLUP);
 
-  pinMode(MODEM_PWRKEY, OUTPUT);
-  pinMode(MODEM_RST, OUTPUT);
-  pinMode(MODEM_POWER_ON, OUTPUT);
-
-  digitalWrite(MODEM_POWER_ON, HIGH);
-  digitalWrite(MODEM_RST, HIGH);
-  digitalWrite(MODEM_PWRKEY, LOW);
+  powerOnModem();
 
   SerialAT.begin(9600, SERIAL_8N1, MODEM_RX, MODEM_TX);
+  delay(3000);
+
+  SerialMon.println("[MODEM] Restarting...");
   modem.restart();
-  connectGPRS();
+  connectGprsIfNeeded();
 }
 
 void loop() {
@@ -664,7 +723,186 @@ void loop() {
     lastPoll = now;
     pollServer();
   }
-  delay(10);
+  delay(20);
+}`;
+
+  const stm32Sim800lCode = `#define TINY_GSM_MODEM_SIM800
+#define TINY_GSM_RX_BUFFER 1024
+
+#include <TinyGsmClient.h>
+#include <ArduinoJson.h>
+
+// =========================
+// PumpPilot STM32 + SIM800L
+// (STM32 Arduino Core)
+// =========================
+
+// ---------- Serial ----------
+#define SerialMon Serial
+#define SerialAT  Serial1   // map TX/RX in your STM32 variant
+
+// ---------- Motor / Input pins ----------
+#define MOTOR_PIN   PA8
+#define LOAD_PIN    PB0
+#define DEVICE_PIN  PB1
+
+// ---------- Signal polarity ----------
+#define LOAD_ACTIVE_LOW          0
+#define DEVICE_READY_ACTIVE_LOW  1
+
+// ---------- Timing ----------
+#define POLL_INTERVAL_MS 5000UL
+
+// ---------- GSM ----------
+const char apn[]      = "internet"; // update APN
+const char gprsUser[] = "";
+const char gprsPass[] = "";
+
+// ---------- Admin-based config ----------
+const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
+const char* SERVER   = "pms-two-kappa.vercel.app";
+const int   PORT     = 80;
+
+TinyGsm modem(SerialAT);
+TinyGsmClient client(modem);
+unsigned long lastPoll = 0;
+
+bool readLoadShedding() {
+  int raw = digitalRead(LOAD_PIN);
+  return LOAD_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+}
+
+bool readDeviceReady() {
+  int raw = digitalRead(DEVICE_PIN);
+  return DEVICE_READY_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+}
+
+void setMotor(bool on) {
+  digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
+  SerialMon.printf("[MOTOR] %s\\n", on ? "ON" : "OFF");
+}
+
+bool connectGprsIfNeeded() {
+  if (modem.isGprsConnected()) return true;
+
+  SerialMon.println("[NET] Waiting network...");
+  if (!modem.waitForNetwork(60000L)) {
+    SerialMon.println("[NET] Network failed");
+    return false;
+  }
+
+  SerialMon.println("[NET] Connecting GPRS...");
+  if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
+    SerialMon.println("[NET] GPRS failed");
+    return false;
+  }
+
+  SerialMon.println("[NET] GPRS connected");
+  return true;
+}
+
+bool readHttpJson(String& bodyOut) {
+  unsigned long t = millis();
+  while (client.connected() && !client.available()) {
+    if (millis() - t > 15000UL) {
+      SerialMon.println("[HTTP] Timeout");
+      return false;
+    }
+    delay(10);
+  }
+
+  String response;
+  while (client.available()) response += client.readString();
+  client.stop();
+
+  int codeStart = response.indexOf("HTTP/1.1 ");
+  if (codeStart < 0) codeStart = response.indexOf("HTTP/1.0 ");
+  int statusCode = -1;
+  if (codeStart >= 0) statusCode = response.substring(codeStart + 9, codeStart + 12).toInt();
+  if (statusCode != 200) {
+    SerialMon.printf("[HTTP] Non-200: %d\\n", statusCode);
+    return false;
+  }
+
+  int jsonStart = response.indexOf('{');
+  if (jsonStart < 0) {
+    SerialMon.println("[HTTP] JSON missing");
+    return false;
+  }
+  bodyOut = response.substring(jsonStart);
+  return true;
+}
+
+void pollServer() {
+  if (!connectGprsIfNeeded()) return;
+
+  bool localLS = readLoadShedding();
+  bool localDev = readDeviceReady();
+
+  String path = "/api/esp32/poll?adminId=" + String(ADMIN_ID) +
+                "&ls=" + (localLS ? "1" : "0") +
+                "&dev=" + (localDev ? "1" : "0");
+
+  if (!client.connect(SERVER, PORT)) {
+    SerialMon.println("[HTTP] Connect failed");
+    return;
+  }
+
+  client.print(String("GET ") + path + " HTTP/1.1\\r\\n");
+  client.print(String("Host: ") + SERVER + "\\r\\n");
+  client.print("Connection: close\\r\\n\\r\\n");
+
+  String body;
+  if (!readHttpJson(body)) return;
+
+  StaticJsonDocument<768> doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    SerialMon.printf("[JSON] Parse error: %s\\n", err.c_str());
+    return;
+  }
+
+  const char* motorStatus = doc["motorStatus"] | "OFF";
+  bool backendLS = doc["loadShedding"] | false;
+  bool backendDev = doc["deviceReady"] | false;
+  const char* adminName = doc["adminName"] | "unknown";
+
+  SerialMon.printf("[POLL] admin=%s status=%s ls=%d localLS=%d dev=%d backendDev=%d\\n",
+                   adminName, motorStatus, backendLS, localLS, localDev, backendDev);
+
+  bool turnOn = (strcmp(motorStatus, "RUNNING") == 0) &&
+                !backendLS &&
+                !localLS &&
+                localDev &&
+                backendDev;
+  setMotor(turnOn);
+}
+
+void setup() {
+  SerialMon.begin(115200);
+  delay(300);
+
+  pinMode(MOTOR_PIN, OUTPUT);
+  digitalWrite(MOTOR_PIN, LOW);
+  pinMode(LOAD_PIN, INPUT_PULLUP);
+  pinMode(DEVICE_PIN, INPUT_PULLUP);
+
+  // set your modem baud / serial mapping as per STM32 board
+  SerialAT.begin(9600);
+  delay(2000);
+
+  SerialMon.println("[MODEM] Restarting...");
+  modem.restart();
+  connectGprsIfNeeded();
+}
+
+void loop() {
+  unsigned long now = millis();
+  if (now - lastPoll >= POLL_INTERVAL_MS) {
+    lastPoll = now;
+    pollServer();
+  }
+  delay(20);
 }`;
 
   const esp32Code =
@@ -674,7 +912,9 @@ void loop() {
         ? esp32MicroPythonCode
         : espCodeType === "esp8266"
           ? esp8266Code
-          : ttgoTCallCode;
+          : espCodeType === "ttgo"
+            ? ttgoTCallCode
+            : stm32Sim800lCode;
 
   const loadData = async () => {
     if (!isAdmin) return;
@@ -1206,7 +1446,7 @@ void loop() {
                   <select
                     value={espCodeType}
                     onChange={(e) =>
-                      setEspCodeType(e.target.value as "arduino" | "micropython" | "esp8266" | "ttgo")
+                      setEspCodeType(e.target.value as "arduino" | "micropython" | "esp8266" | "ttgo" | "stm32")
                     }
                     className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
                   >
@@ -1214,6 +1454,7 @@ void loop() {
                     <option value="micropython">ESP32 MicroPython code</option>
                     <option value="esp8266">ESP8266 Arduino code</option>
                     <option value="ttgo">TTGO T-Call AM-036 (SIM800)</option>
+                    <option value="stm32">STM32 + SIM800L code</option>
                   </select>
                   <button
                     onClick={copyEsp32Code}
