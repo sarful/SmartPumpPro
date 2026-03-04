@@ -22,6 +22,7 @@ type UserLean = {
   suspendReason?: string | null;
   availableMinutes?: number;
   motorStatus?: string;
+  motorRunningTime?: number;
 };
 
 export async function GET(req: NextRequest) {
@@ -40,7 +41,15 @@ export async function GET(req: NextRequest) {
       Queue.countDocuments({ status: "WAITING" }),
       Admin.find({}).select({ username: 1, status: 1, loadShedding: 1, suspendReason: 1 }).lean(),
       User.find({})
-        .select({ username: 1, adminId: 1, status: 1, suspendReason: 1, availableMinutes: 1, motorStatus: 1 })
+        .select({
+          username: 1,
+          adminId: 1,
+          status: 1,
+          suspendReason: 1,
+          availableMinutes: 1,
+          motorStatus: 1,
+          motorRunningTime: 1,
+        })
         .lean(),
       SystemState.findOneAndUpdate(
         { key: "global" },
@@ -62,6 +71,7 @@ export async function GET(req: NextRequest) {
       suspendReason: user.suspendReason ?? null,
       availableMinutes: user.availableMinutes ?? 0,
       motorStatus: user.motorStatus ?? "OFF",
+      motorRunningTime: user.motorRunningTime ?? 0,
     }));
 
     const adminsList = adminList.map((admin) => ({

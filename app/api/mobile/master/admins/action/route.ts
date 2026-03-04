@@ -70,28 +70,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // delete
-    const admin = await Admin.findById(adminObjectId).lean();
-    if (!admin) return NextResponse.json({ error: "Admin not found" }, { status: 404 });
+    if (action === "delete") {
+      const admin = await Admin.findById(adminObjectId).lean();
+      if (!admin) return NextResponse.json({ error: "Admin not found" }, { status: 404 });
 
-    const [usersDelete, queueDelete, requestDelete, usageDelete, adminDelete] = await Promise.all([
-      User.deleteMany({ adminId: adminObjectId }),
-      Queue.deleteMany({ adminId: adminObjectId }),
-      MinuteRequest.deleteMany({ adminId: adminObjectId }),
-      UsageHistory.deleteMany({ adminId: adminObjectId }),
-      Admin.deleteOne({ _id: adminObjectId }),
-    ]);
+      const [usersDelete, queueDelete, requestDelete, usageDelete, adminDelete] = await Promise.all([
+        User.deleteMany({ adminId: adminObjectId }),
+        Queue.deleteMany({ adminId: adminObjectId }),
+        MinuteRequest.deleteMany({ adminId: adminObjectId }),
+        UsageHistory.deleteMany({ adminId: adminObjectId }),
+        Admin.deleteOne({ _id: adminObjectId }),
+      ]);
 
-    return NextResponse.json({
-      success: true,
-      deleted: {
-        admins: adminDelete.deletedCount ?? 0,
-        users: usersDelete.deletedCount ?? 0,
-        queues: queueDelete.deletedCount ?? 0,
-        minuteRequests: requestDelete.deletedCount ?? 0,
-        usageHistory: usageDelete.deletedCount ?? 0,
-      },
-    });
+      return NextResponse.json({
+        success: true,
+        deleted: {
+          admins: adminDelete.deletedCount ?? 0,
+          users: usersDelete.deletedCount ?? 0,
+          queues: queueDelete.deletedCount ?? 0,
+          minuteRequests: requestDelete.deletedCount ?? 0,
+          usageHistory: usageDelete.deletedCount ?? 0,
+        },
+      });
+    }
+
+    return NextResponse.json({ error: "Unsupported action" }, { status: 400 });
   } catch (error) {
     console.error("mobile master admin action error", error);
     return NextResponse.json({ error: "Failed to process admin action" }, { status: 500 });
