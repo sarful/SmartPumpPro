@@ -182,7 +182,22 @@ export default function UserDashboardPage() {
       }
 
       try {
-        const resReq = await fetch("/api/user/minute-request", { cache: "no-store" });
+        const requestUrl = "/api/user/minute-request";
+        let resReq = await fetch(requestUrl, {
+          cache: "no-store",
+          credentials: "include",
+        });
+
+        // During fresh page/session hydration, auth cookie can be delayed briefly.
+        // Retry once to avoid noisy first 401 while keeping auth rules unchanged.
+        if (resReq.status === 401) {
+          await new Promise((resolve) => setTimeout(resolve, 600));
+          resReq = await fetch(requestUrl, {
+            cache: "no-store",
+            credentials: "include",
+          });
+        }
+
         if (resReq.ok) {
           const json = (await resReq.json()) as { requests?: MinuteRequestItem[] };
           const pending = json.requests?.find((req) => req.status === "pending");

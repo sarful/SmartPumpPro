@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
       const updated = await MasterAdmin.findOneAndUpdate(
         { username },
         { $set: { password } },
-        { new: true },
+        { returnDocument: 'after' },
       ).lean();
       if (!updated) {
         return NextResponse.json({ error: "Master admin not found" }, { status: 404 });
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
       const updated = await Admin.findOneAndUpdate(
         { username },
         { $set: { password } },
-        { new: true },
+        { returnDocument: 'after' },
       ).lean();
       if (!updated) {
         return NextResponse.json({ error: "Admin not found" }, { status: 404 });
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
     const updated = await User.findOneAndUpdate(
       { username },
       { $set: { password } },
-      { new: true },
+      { returnDocument: 'after' },
     ).lean();
     if (!updated) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });

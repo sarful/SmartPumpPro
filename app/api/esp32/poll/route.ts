@@ -99,7 +99,7 @@ export async function GET(req: NextRequest) {
           },
         },
         {
-          new: true,
+          returnDocument: 'after',
           projection: {
             loadShedding: 1,
             username: 1,

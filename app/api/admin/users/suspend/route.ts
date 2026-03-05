@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   const updated = await User.findOneAndUpdate(
     { _id: userId, adminId: session.user.adminId },
     { status: 'suspended', suspendReason: reason || 'Suspended by admin' },
-    { new: true },
+    { returnDocument: 'after' },
   ).lean();
   if (!updated) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 

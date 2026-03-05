@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     const settings = await SystemState.findOneAndUpdate(
       { key: "global" },
       { $setOnInsert: { key: "global", manualAdminApproval: true } },
-      { upsert: true, new: true },
+      { upsert: true, returnDocument: 'after' },
     ).lean();
     const manualAdminApproval = settings?.manualAdminApproval ?? true;
 

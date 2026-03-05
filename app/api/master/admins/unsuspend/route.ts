@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   const updated = await Admin.findOneAndUpdate(
     { _id: adminId },
     { status: 'active', suspendReason: null },
-    { new: true },
+    { returnDocument: 'after' },
   ).lean();
 
   if (!updated) return NextResponse.json({ error: 'Admin not found' }, { status: 404 });

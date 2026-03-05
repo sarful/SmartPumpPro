@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   const updated = await User.findOneAndUpdate(
     { _id: userId, adminId: session.user.adminId },
     { status: 'active', suspendReason: null },
-    { new: true },
+    { returnDocument: 'after' },
   ).lean();
 
   if (!updated) {

@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     const state = await SystemState.findOneAndUpdate(
       { key: "global" },
       { $set: { manualAdminApproval: body.manualAdminApproval } },
-      { upsert: true, new: true },
+      { upsert: true, returnDocument: 'after' },
     ).lean();
 
     return NextResponse.json({ success: true, manualAdminApproval: Boolean(state?.manualAdminApproval) });

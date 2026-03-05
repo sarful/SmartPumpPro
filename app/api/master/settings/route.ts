@@ -13,7 +13,7 @@ export async function GET(_req: NextRequest) {
   const state = await SystemState.findOneAndUpdate(
     { key: "global" },
     { $setOnInsert: { key: "global", manualAdminApproval: true } },
-    { upsert: true, new: true },
+    { upsert: true, returnDocument: 'after' },
   ).lean();
 
   return NextResponse.json({
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
   const state = await SystemState.findOneAndUpdate(
     { key: "global" },
     { $set: { manualAdminApproval: body.manualAdminApproval } },
-    { upsert: true, new: true },
+    { upsert: true, returnDocument: 'after' },
   ).lean();
 
   return NextResponse.json({

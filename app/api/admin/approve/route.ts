@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
     const updated = await Admin.findOneAndUpdate(
       { _id: adminId, status: 'pending' },
       { status: 'active' },
-      { new: true },
+      { returnDocument: 'after' },
     ).lean();
 
     if (!updated) {

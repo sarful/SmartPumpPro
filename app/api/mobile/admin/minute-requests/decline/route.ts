@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     const updated = await MinuteRequest.findOneAndUpdate(
       { _id: body.requestId, adminId, status: "pending" },
       { status: "declined" },
-      { new: true },
+      { returnDocument: 'after' },
     ).lean();
 
     if (!updated) return NextResponse.json({ error: "Request not found" }, { status: 404 });

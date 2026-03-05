@@ -86,7 +86,7 @@ export async function startNextUser(
   const next = await Queue.findOneAndUpdate(
     { adminId: adminObjectId, status: 'WAITING' },
     { status: 'RUNNING' },
-    { sort: { position: 1 }, new: true },
+    { sort: { position: 1 }, returnDocument: 'after' },
   );
 
   if (next) {

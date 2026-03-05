@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
       const updated = await User.findOneAndUpdate(
         { _id: userId },
         { status: "suspended", suspendReason: reason || "Suspended by master" },
-        { new: true },
+        { returnDocument: 'after' },
       ).lean();
       if (!updated) return NextResponse.json({ error: "User not found" }, { status: 404 });
       return NextResponse.json({ success: true });
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
       const updated = await User.findOneAndUpdate(
         { _id: userId },
         { status: "active", suspendReason: null },
-        { new: true },
+        { returnDocument: 'after' },
       ).lean();
       if (!updated) return NextResponse.json({ error: "User not found" }, { status: 404 });
       return NextResponse.json({ success: true });

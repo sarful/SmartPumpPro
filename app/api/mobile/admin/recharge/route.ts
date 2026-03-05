@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     const user = await User.findOneAndUpdate(
       { _id: userId, adminId },
       { $inc: { availableMinutes: minutes } },
-      { new: true },
+      { returnDocument: 'after' },
     ).lean();
 
     if (!user) {

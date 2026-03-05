@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   const updated = await User.findOneAndUpdate(
     { _id: userId },
     { status: 'active', suspendReason: null },
-    { new: true },
+    { returnDocument: 'after' },
   ).lean();
 
   if (!updated) return NextResponse.json({ error: 'User not found' }, { status: 404 });

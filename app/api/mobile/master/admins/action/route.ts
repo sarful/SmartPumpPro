@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
       const updated = await Admin.findOneAndUpdate(
         { _id: adminObjectId, status: "pending" },
         { status: "active", suspendReason: null },
-        { new: true },
+        { returnDocument: 'after' },
       ).lean();
       if (!updated) {
         return NextResponse.json({ error: "Admin not found or already active" }, { status: 404 });
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
       const updated = await Admin.findOneAndUpdate(
         { _id: adminObjectId },
         { status: "suspended", suspendReason: reason || "Suspended by master" },
-        { new: true },
+        { returnDocument: 'after' },
       ).lean();
       if (!updated) return NextResponse.json({ error: "Admin not found" }, { status: 404 });
       return NextResponse.json({ success: true });
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
       const updated = await Admin.findOneAndUpdate(
         { _id: adminObjectId },
         { status: "active", suspendReason: null },
-        { new: true },
+        { returnDocument: 'after' },
       ).lean();
       if (!updated) return NextResponse.json({ error: "Admin not found" }, { status: 404 });
       return NextResponse.json({ success: true });

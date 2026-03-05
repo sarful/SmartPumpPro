@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
       SystemState.findOneAndUpdate(
         { key: "global" },
         { $setOnInsert: { key: "global", manualAdminApproval: true } },
-        { upsert: true, new: true },
+        { upsert: true, returnDocument: 'after' },
       ).lean(),
     ]);
 
