@@ -6,6 +6,7 @@ import User from "@/models/User";
 import MinuteRequest from "@/models/MinuteRequest";
 import Queue from "@/models/Queue";
 import { isDeviceOnline, isDeviceReadyEffective } from "@/lib/device-readiness";
+import { logReadinessTransitions } from "@/lib/usage-logger";
 
 type UserLean = {
   _id: unknown;
@@ -84,15 +85,29 @@ export async function GET(req: NextRequest) {
       .select({ position: 1, status: 1, requestedMinutes: 1, userId: 1 })
       .lean();
 
+    const deviceOnline = isDeviceOnline(admin.deviceLastSeenAt);
+    const effectiveDeviceReady = isDeviceReadyEffective(admin);
+    const effectiveLoadShedding = Boolean(admin.loadShedding) && deviceOnline;
+
+    await logReadinessTransitions({
+      adminId,
+      current: {
+        deviceReady: effectiveDeviceReady,
+        loadShedding: effectiveLoadShedding,
+        internetOnline: effectiveDeviceReady,
+      },
+      meta: { source: "mobile_admin_dashboard" },
+    });
+
     return NextResponse.json({
       admin: {
         id: String(admin._id),
         username: admin.username,
         status: admin.status,
         suspendReason: admin.suspendReason ?? null,
-        loadShedding: Boolean(admin.loadShedding) && isDeviceOnline(admin.deviceLastSeenAt),
-        deviceReady: isDeviceReadyEffective(admin),
-        deviceOnline: isDeviceOnline(admin.deviceLastSeenAt),
+        loadShedding: effectiveLoadShedding,
+        deviceReady: effectiveDeviceReady,
+        deviceOnline,
         devicePinHigh: Boolean(admin.devicePinHigh),
         deviceLastSeenAt: admin.deviceLastSeenAt ?? null,
       },

@@ -88,7 +88,7 @@ export default function AdminDashboardPage() {
 // ---- SERVER CONFIG ----
 // Admin-based config with your ADMIN_ID
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
-const char* API_HOST = "http://192.168.2.102:3000";
+const char* API_HOST = "https://pms-two-kappa.vercel.app";
 
 unsigned long lastPoll = 0;
 
@@ -914,6 +914,16 @@ void loop() {
             ? ttgoTCallCode
             : stm32Sim800lCode;
 
+  const readJson = async (res: Response) => {
+    const raw = await res.text();
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return { error: raw };
+    }
+  };
+
   const loadData = async () => {
     if (!isAdmin) return;
     setLoading(true);
@@ -925,10 +935,10 @@ void loop() {
         fetch("/api/admin/status"),
         fetch("/api/admin/minute-requests"),
       ]);
-      const usersJson = await usersRes.json();
-      const activityJson = await activityRes.json();
-      const statusJson = await statusRes.json();
-      const reqJson = await reqRes.json();
+      const usersJson = await readJson(usersRes);
+      const activityJson = await readJson(activityRes);
+      const statusJson = await readJson(statusRes);
+      const reqJson = await readJson(reqRes);
       setUsers(usersJson.users ?? []);
       setQueue(activityJson.queue ?? []);
       if (statusRes.ok && statusJson.admin) {
@@ -972,7 +982,7 @@ void loop() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newUser),
       });
-      const json = await res.json();
+      const json = await readJson(res);
       if (!res.ok) throw new Error(json.error || "Create failed");
       setNewUser({ username: "", password: "" });
       await loadData();
@@ -992,7 +1002,7 @@ void loop() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: rechargeTarget, minutes: rechargeMinutes }),
       });
-      const json = await res.json();
+      const json = await readJson(res);
       if (!res.ok) throw new Error(json.error || "Recharge failed");
       setRechargeMinutes(0);
       await loadData();
@@ -1009,7 +1019,7 @@ void loop() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ requestId: id }),
     });
-    const json = await res.json();
+    const json = await readJson(res);
     if (!res.ok) {
       setError(json.error || "Approve failed");
       return;
@@ -1023,7 +1033,7 @@ void loop() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ requestId: id }),
     });
-    const json = await res.json();
+    const json = await readJson(res);
     if (!res.ok) {
       setError(json.error || "Decline failed");
       return;
@@ -1036,7 +1046,7 @@ void loop() {
     const res = await fetch(`/api/admin/users?userId=${userId}`, {
       method: "DELETE",
     });
-    const json = await res.json();
+    const json = await readJson(res);
     if (!res.ok) {
       setError(json.error || "Delete failed");
       return;
@@ -1054,7 +1064,7 @@ void loop() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId }),
       });
-      const json = await res.json();
+      const json = await readJson(res);
       if (!res.ok) {
         setError(json.error || "Failed to stop/reset motor");
         return;
@@ -1082,7 +1092,7 @@ void loop() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, requestedMinutes }),
       });
-      const json = await res.json();
+      const json = await readJson(res);
       if (!res.ok) {
         setError(json.error || "Failed to start motor");
         return;
@@ -1111,7 +1121,7 @@ void loop() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId, reason }),
     });
-    const json = await res.json();
+    const json = await readJson(res);
     if (!res.ok) {
       setSuspendError(json.error || "Suspend failed");
       return;
@@ -1128,7 +1138,7 @@ void loop() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId }),
     });
-    const json = await res.json();
+    const json = await readJson(res);
     if (!res.ok) {
       setSuspendError(json.error || "Unsuspend failed");
       return;
@@ -1375,21 +1385,21 @@ void loop() {
                       </button>
                       <button
                         onClick={() => handleDeleteUser(u._id)}
-                        className="ml-2 rounded-lg border border-red-600 px-2 py-1 text-xs text-red-200 hover:bg-red-800/50"
+                        className="ml-2 rounded-lg border border-red-500 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
                       >
                         Delete
                       </button>
                       {u.status === "suspended" ? (
                         <button
                           onClick={() => handleUnsuspendUser(u._id)}
-                          className="ml-2 rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-800/50"
+                          className="ml-2 rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50"
                         >
                           Unsuspend
                         </button>
                       ) : (
                         <button
                           onClick={() => handleSuspendUser(u._id)}
-                          className="ml-2 rounded-lg border border-amber-500 px-2 py-1 text-xs text-amber-200 hover:bg-amber-800/50"
+                          className="ml-2 rounded-lg border border-amber-500 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
                         >
                           Suspend
                         </button>
@@ -1469,7 +1479,7 @@ void loop() {
                         </button>
                         <button
                           onClick={() => handleDeclineRequest(r._id)}
-                          className="rounded-lg border border-red-600 px-3 py-2 text-xs text-red-200 hover:bg-red-800/50"
+                          className="rounded-lg border border-red-500 px-3 py-2 text-xs text-red-700 hover:bg-red-50"
                         >
                           Decline
                         </button>

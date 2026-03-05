@@ -96,6 +96,7 @@ export async function GET(req: NextRequest) {
 
   if (format === 'csv') {
     const header = [
+      'id',
       'date',
       'event',
       'adminUsername',
@@ -117,6 +118,7 @@ export async function GET(req: NextRequest) {
           internetOnline: readinessFromMeta.internetOnline || adminFallback?.internetOnline || '',
         };
         return [
+        entry._id ? String(entry._id) : '',
         entry.date ? new Date(entry.date).toISOString() : '',
         entry.event ?? '',
         entry.adminId?.username ?? '',

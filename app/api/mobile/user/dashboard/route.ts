@@ -7,6 +7,7 @@ import Queue from "@/models/Queue";
 import MinuteRequest from "@/models/MinuteRequest";
 import { getQueuePosition } from "@/lib/queue-engine";
 import { isDeviceOnline, isDeviceReadyEffective } from "@/lib/device-readiness";
+import { logReadinessTransitions } from "@/lib/usage-logger";
 
 async function estimateWait(adminId: string, userId: string): Promise<number | null> {
   const entry = await Queue.findOne({
@@ -90,6 +91,19 @@ export async function GET(req: NextRequest) {
       .lean();
 
     const deviceOnline = isDeviceOnline(admin?.deviceLastSeenAt ?? null);
+    const effectiveDeviceReady = isDeviceReadyEffective(admin);
+    const effectiveLoadShedding = Boolean(admin?.loadShedding) && deviceOnline;
+
+    await logReadinessTransitions({
+      adminId: user.adminId,
+      userId: user._id,
+      current: {
+        deviceReady: effectiveDeviceReady,
+        loadShedding: effectiveLoadShedding,
+        internetOnline: effectiveDeviceReady,
+      },
+      meta: { source: "mobile_user_dashboard" },
+    });
 
     return NextResponse.json({
       userId: String(user._id),
@@ -102,8 +116,8 @@ export async function GET(req: NextRequest) {
       queuePosition,
       runningUser: runningUser?.username ?? null,
       estimatedWait,
-      loadShedding: Boolean(admin?.loadShedding) && deviceOnline,
-      deviceReady: isDeviceReadyEffective(admin),
+      loadShedding: effectiveLoadShedding,
+      deviceReady: effectiveDeviceReady,
       userStatus: user.status ?? "active",
       userSuspendReason: user.suspendReason ?? null,
       adminStatus: admin?.status ?? "active",

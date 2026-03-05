@@ -21,6 +21,12 @@ const eventLabel: Record<string, string> = {
   attendance: "Attendance",
   hold: "Hold",
   resume: "Resume",
+  system_device_ready: "Device Ready",
+  system_device_not_ready: "Device Not Ready",
+  system_loadshedding_on: "Loadshedding On",
+  system_loadshedding_off: "Loadshedding Off",
+  system_internet_online: "Internet Online",
+  system_internet_offline: "Internet Offline",
 };
 
 function resolveName(value: HistoryEntry["userId"] | HistoryEntry["adminId"]) {

@@ -10,8 +10,10 @@ type MinuteReqStatus = "pending" | "approved" | "declined";
 type UserStatus = "active" | "suspended";
 
 type RealtimePayload = {
+  userId?: string;
   motorStatus: MotorStatus;
   remainingMinutes: number;
+  availableMinutes?: number;
   loadShedding: boolean;
   deviceReady?: boolean;
   adminStatus?: UserStatus;
@@ -23,6 +25,7 @@ type RealtimePayload = {
 };
 
 type UserMePayload = {
+  userId?: string;
   availableMinutes?: number;
   queuePosition?: number | null;
   adminName?: string;
@@ -59,8 +62,8 @@ export default function UserDashboardPage() {
   const [setMinutes, setSetMinutes] = useState(10);
   const [availableMinutes, setAvailableMinutes] = useState(0);
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
-  const [adminName, setAdminName] = useState<string>("...");
-  const [userName, setUserName] = useState<string>("User");
+  const [adminName, setAdminName] = useState<string>("-");
+  const [userName, setUserName] = useState<string>("-");
   const [optimisticStatus, setOptimisticStatus] = useState<MotorStatus | null>(null);
   const [optimisticRemaining, setOptimisticRemaining] = useState<number | null>(null);
   const [startLoading, setStartLoading] = useState(false);
@@ -80,11 +83,13 @@ export default function UserDashboardPage() {
   const [adminReason, setAdminReason] = useState<string | null>(null);
   const [deviceReady, setDeviceReady] = useState<boolean | null>(null);
   const [internetOnline, setInternetOnline] = useState(true);
+  const [resolvedUserId, setResolvedUserId] = useState<string | null>(null);
 
   const role = session?.user?.role;
   const isUser = role === "user";
   const ADMIN_ID = isUser ? session?.user?.adminId ?? "" : "";
-  const USER_ID = isUser ? session?.user?.id ?? "" : "";
+  const SESSION_USER_ID = isUser ? session?.user?.id ?? "" : "";
+  const USER_ID = resolvedUserId ?? SESSION_USER_ID;
   const idsValid =
     ADMIN_ID.length === 24 &&
     USER_ID.length === 24 &&
@@ -98,6 +103,8 @@ export default function UserDashboardPage() {
 
   const motorStatus = data?.motorStatus ?? "OFF";
   const remainingMinutes = data?.remainingMinutes ?? 0;
+  const availableMinutesLive = data?.availableMinutes;
+  const realtimeUserId = data?.userId;
   const loadShedding = data?.loadShedding ?? false;
   const realtimeDeviceReady = data?.deviceReady;
   const queuePositionLive = data?.queuePosition;
@@ -126,20 +133,38 @@ export default function UserDashboardPage() {
       setOptimisticStatus(null);
       setOptimisticRemaining(null);
     }
+    if (
+      typeof availableMinutesLive === "number" &&
+      typeof realtimeUserId === "string" &&
+      realtimeUserId === USER_ID
+    ) {
+      setAvailableMinutes(availableMinutesLive);
+    }
     if (data && "queuePosition" in data) {
       setLocalQueueCleared(false);
     }
-  }, [data]);
+  }, [data, availableMinutesLive, realtimeUserId, USER_ID]);
+
+  useEffect(() => {
+    if (session?.user?.username) setUserName(session.user.username);
+    if (session?.user?.adminId && adminName === "-") {
+      // show stable fallback while /api/user/me resolves admin name
+      setAdminName("Admin");
+    }
+  }, [session, adminName]);
 
   useEffect(() => {
     const load = async () => {
-      if (!idsValid || !isUser) return;
+      if (!isUser) return;
 
       try {
         const res = await fetch("/api/user/me", { cache: "no-store" });
         const json = (await res.json()) as UserMePayload;
 
         if (res.ok) {
+          if (json.userId && /^[a-fA-F0-9]{24}$/.test(json.userId)) {
+            setResolvedUserId(json.userId);
+          }
           setAvailableMinutes(json.availableMinutes ?? 0);
           setQueuePosition(json.queuePosition ?? null);
           setAdminName(json.adminName ?? "Admin");

@@ -6,7 +6,13 @@ export type UsageEvent =
   | 'recharge'
   | 'attendance'
   | 'hold'
-  | 'resume';
+  | 'resume'
+  | 'system_device_ready'
+  | 'system_device_not_ready'
+  | 'system_loadshedding_on'
+  | 'system_loadshedding_off'
+  | 'system_internet_online'
+  | 'system_internet_offline';
 
 export interface UsageHistoryDocument extends mongoose.Document {
   userId: Types.ObjectId;
@@ -24,7 +30,24 @@ const usageHistorySchema = new Schema<UsageHistoryDocument>(
     adminId: { type: Schema.Types.ObjectId, ref: 'Admin', required: true, index: true },
     usedMinutes: { type: Number },
     addedMinutes: { type: Number },
-    event: { type: String, enum: ['motor_start', 'motor_stop', 'recharge', 'attendance', 'hold', 'resume'], required: true },
+    event: {
+      type: String,
+      enum: [
+        'motor_start',
+        'motor_stop',
+        'recharge',
+        'attendance',
+        'hold',
+        'resume',
+        'system_device_ready',
+        'system_device_not_ready',
+        'system_loadshedding_on',
+        'system_loadshedding_off',
+        'system_internet_online',
+        'system_internet_offline',
+      ],
+      required: true,
+    },
     date: { type: Date, default: Date.now, index: true },
     meta: { type: Schema.Types.Mixed },
   },

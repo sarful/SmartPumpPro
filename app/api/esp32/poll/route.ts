@@ -7,6 +7,7 @@ import { getQueuePosition } from '@/lib/queue-engine';
 import { tickRunningMotors } from '@/lib/timer-engine';
 import { activateLoadShedding, clearLoadShedding } from '@/lib/loadshedding-engine';
 import { isDeviceOnline, isDeviceReadyEffective } from '@/lib/device-readiness';
+import { logReadinessTransitions } from '@/lib/usage-logger';
 
 const BAD_REQUEST = { error: 'adminId is required' };
 
@@ -153,7 +154,7 @@ export async function GET(req: NextRequest) {
     }
 
     const freshUser = await User.findById(user._id)
-      .select({ motorStatus: 1, motorRunningTime: 1, adminId: 1, username: 1, status: 1 })
+      .select({ motorStatus: 1, motorRunningTime: 1, availableMinutes: 1, adminId: 1, username: 1, status: 1 })
       .lean();
 
     if (!freshUser) {
@@ -178,9 +179,24 @@ export async function GET(req: NextRequest) {
             ? 'user_suspended'
             : null;
 
+    await logReadinessTransitions({
+      adminId: freshUser.adminId.toString(),
+      userId: freshUser._id.toString(),
+      current: {
+        deviceReady: effectiveDeviceReady,
+        loadShedding: effectiveLoadShedding,
+        internetOnline: effectiveDeviceReady,
+      },
+      meta: {
+        source: 'esp32_poll',
+      },
+    });
+
     return NextResponse.json({
+      userId: freshUser._id,
       motorStatus: freshUser.motorStatus,
       remainingMinutes: freshUser.motorRunningTime ?? 0,
+      availableMinutes: freshUser.availableMinutes ?? 0,
       loadShedding: effectiveLoadShedding,
       deviceReady: effectiveDeviceReady,
       devicePinHigh: admin?.devicePinHigh ?? false,

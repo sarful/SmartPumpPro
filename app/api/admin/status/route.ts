@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth';
 import { connectDB } from '@/lib/mongodb';
 import Admin from '@/models/Admin';
 import { isDeviceOnline, isDeviceReadyEffective } from '@/lib/device-readiness';
+import { logReadinessTransitions } from '@/lib/usage-logger';
 
 export async function GET(_req: NextRequest) {
   const session = await auth();
@@ -15,12 +16,23 @@ export async function GET(_req: NextRequest) {
     .lean();
   if (!admin) return NextResponse.json({ error: 'Admin not found' }, { status: 404 });
   const deviceOnline = isDeviceOnline(admin.deviceLastSeenAt);
+  const effectiveDeviceReady = isDeviceReadyEffective(admin);
+  const effectiveLoadShedding = Boolean(admin.loadShedding) && deviceOnline;
+  await logReadinessTransitions({
+    adminId: session.user.adminId!,
+    current: {
+      deviceReady: effectiveDeviceReady,
+      loadShedding: effectiveLoadShedding,
+      internetOnline: effectiveDeviceReady,
+    },
+    meta: { source: 'admin_status' },
+  });
   return NextResponse.json({
     admin: {
       ...admin,
-      loadShedding: Boolean(admin.loadShedding) && deviceOnline,
+      loadShedding: effectiveLoadShedding,
       deviceOnline,
-      deviceReady: isDeviceReadyEffective(admin),
+      deviceReady: effectiveDeviceReady,
     },
   });
 }
