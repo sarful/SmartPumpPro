@@ -12,6 +12,13 @@ import {
   hashRefreshToken,
 } from "@/lib/mobile-auth";
 import { rateLimit } from "@/lib/rate-limit";
+import {
+  clearFailedAuth,
+  ensureNotLocked,
+  getRequestIpFromHeaderValue,
+  makeThrottleKey,
+  registerFailedAuth,
+} from "@/lib/auth-security";
 
 type Body = {
   username?: string;
@@ -33,7 +40,7 @@ async function verifyPassword(stored: string | undefined | null, provided: strin
 
 export async function POST(req: NextRequest) {
   try {
-    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const ip = getRequestIpFromHeaderValue(req.headers.get("x-forwarded-for"));
     const limiter = rateLimit(`mobile-login:${ip}`, 10, 60_000);
     if (!limiter.allowed) {
       return NextResponse.json(
@@ -55,6 +62,15 @@ export async function POST(req: NextRequest) {
     const userAgent = req.headers.get("user-agent") ?? "";
     if (!username || !password) {
       return NextResponse.json({ error: "username and password are required" }, { status: 400 });
+    }
+
+    const throttleKey = makeThrottleKey("mobile", username, ip);
+    const lockState = await ensureNotLocked({ key: throttleKey });
+    if (!lockState.allowed) {
+      return NextResponse.json(
+        { error: "Account temporarily locked due to failed attempts. Try again later." },
+        { status: 429 },
+      );
     }
 
     await connectDB();
@@ -96,6 +112,7 @@ export async function POST(req: NextRequest) {
 
     const master = await MasterAdmin.findOne({ username }).lean();
     if (master && (await verifyPassword(master.password, password))) {
+      await clearFailedAuth({ key: throttleKey });
       const refreshToken = await createSession({
         userId: master._id.toString(),
         role: "master",
@@ -115,6 +132,7 @@ export async function POST(req: NextRequest) {
 
     const admin = await Admin.findOne({ username, status: "active" }).lean();
     if (admin && (await verifyPassword(admin.password, password))) {
+      await clearFailedAuth({ key: throttleKey });
       const refreshToken = await createSession({
         userId: admin._id.toString(),
         role: "admin",
@@ -141,6 +159,7 @@ export async function POST(req: NextRequest) {
 
     const user = await User.findOne({ username, status: { $ne: "suspended" } }).lean();
     if (user && (await verifyPassword(user.password, password))) {
+      await clearFailedAuth({ key: throttleKey });
       const adminId = user.adminId?.toString();
       const refreshToken = await createSession({
         userId: user._id.toString(),
@@ -166,6 +185,12 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    await registerFailedAuth({
+      key: throttleKey,
+      username,
+      ip,
+      scope: "mobile",
+    });
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   } catch (error) {
     console.error("mobile login error", error);

@@ -5,6 +5,7 @@ import { addToQueue, getQueuePosition, isMotorBusy } from '@/lib/queue-engine';
 import { auth } from '@/lib/auth';
 import Admin from '@/models/Admin';
 import { isDeviceReadyEffective } from '@/lib/device-readiness';
+import { enforceRateLimit } from '@/lib/api-guard';
 
 type StartMotorRequestBody = {
   userId?: string;
@@ -13,6 +14,9 @@ type StartMotorRequestBody = {
 
 export async function POST(req: NextRequest) {
   try {
+    const limited = enforceRateLimit(req, 'motor-start', 30, 60_000);
+    if (limited) return limited;
+
     const session = await auth();
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -89,10 +93,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ status: 'RUNNING', queuePosition: 0 });
   } catch (error: any) {
     console.error('Motor start error:', error);
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json(
-      { error: message, details: typeof error === 'object' ? JSON.stringify(error) : undefined },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: 'Failed to start motor' }, { status: 500 });
   }
 }

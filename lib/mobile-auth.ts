@@ -20,6 +20,9 @@ function getSecret() {
   if (!secret) {
     throw new Error("Missing MOBILE_JWT_SECRET or NEXTAUTH_SECRET");
   }
+  if (process.env.NODE_ENV === "production" && secret.length < 32) {
+    throw new Error("JWT secret too short. Use at least 32 characters in production.");
+  }
   return secret;
 }
 

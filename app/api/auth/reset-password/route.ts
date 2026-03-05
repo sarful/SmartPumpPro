@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { hash } from "bcryptjs";
 import { connectDB } from "@/lib/mongodb";
 import MasterAdmin from "@/models/MasterAdmin";
 import Admin from "@/models/Admin";
 import User from "@/models/User";
+import { enforceRateLimit } from "@/lib/api-guard";
 
 type Body = {
   role?: "master" | "admin" | "user";
@@ -11,8 +12,18 @@ type Body = {
   newPassword?: string;
 };
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
+    const limited = enforceRateLimit(req, "auth-reset-password", 5, 60_000);
+    if (limited) return limited;
+
+    if (process.env.ENABLE_PASSWORD_RESET_API !== "true") {
+      return NextResponse.json(
+        { error: "Password reset API is disabled. Enable ENABLE_PASSWORD_RESET_API=true to use it." },
+        { status: 403 },
+      );
+    }
+
     const body = (await req.json()) as Body;
     const role = body.role;
     const username = body.username?.trim();

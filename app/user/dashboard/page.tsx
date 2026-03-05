@@ -133,32 +133,34 @@ export default function UserDashboardPage() {
       setOptimisticStatus(null);
       setOptimisticRemaining(null);
     }
+    // Only trust realtime wallet after canonical user id is resolved from /api/user/me.
+    // This prevents stale session ids from overwriting wallet with another user's value.
     if (
       typeof availableMinutesLive === "number" &&
       typeof realtimeUserId === "string" &&
-      realtimeUserId === USER_ID
+      typeof resolvedUserId === "string" &&
+      realtimeUserId === resolvedUserId
     ) {
       setAvailableMinutes(availableMinutesLive);
     }
     if (data && "queuePosition" in data) {
       setLocalQueueCleared(false);
     }
-  }, [data, availableMinutesLive, realtimeUserId, USER_ID]);
+  }, [data, availableMinutesLive, realtimeUserId, resolvedUserId]);
 
   useEffect(() => {
     if (session?.user?.username) setUserName(session.user.username);
-    if (session?.user?.adminId && adminName === "-") {
-      // show stable fallback while /api/user/me resolves admin name
-      setAdminName("Admin");
-    }
-  }, [session, adminName]);
+  }, [session]);
 
   useEffect(() => {
     const load = async () => {
-      if (!isUser) return;
+      if (sessionStatus !== "authenticated" || !isUser) return;
 
       try {
-        const res = await fetch("/api/user/me", { cache: "no-store" });
+        const res = await fetch("/api/user/me", {
+          cache: "no-store",
+          credentials: "include",
+        });
         const json = (await res.json()) as UserMePayload;
 
         if (res.ok) {
@@ -167,8 +169,8 @@ export default function UserDashboardPage() {
           }
           setAvailableMinutes(json.availableMinutes ?? 0);
           setQueuePosition(json.queuePosition ?? null);
-          setAdminName(json.adminName ?? "Admin");
-          setUserName(json.username ?? "User");
+          setAdminName(json.adminName ?? "-");
+          setUserName(json.username ?? "-");
           setUserStatus(json.status ?? "active");
           setUserReason(json.suspendReason ?? null);
           setAdminStatus(json.adminStatus ?? "active");
@@ -203,7 +205,7 @@ export default function UserDashboardPage() {
     load();
     const intervalId = setInterval(load, 10000);
     return () => clearInterval(intervalId);
-  }, [idsValid, isUser]);
+  }, [isUser, sessionStatus, ADMIN_ID, USER_ID]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

@@ -7,7 +7,12 @@
     "dev:nodemon": "nodemon",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:migrate": "node scripts/migrate.js",
+    "db:seed": "node scripts/seed.js",
+    "db:setup": "node scripts/setup.js",
+    "install:check": "node scripts/install-check.js",
+    "package:codecanyon": "node scripts/prepare-codecanyon.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

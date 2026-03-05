@@ -16,27 +16,33 @@ export async function GET(_req: NextRequest) {
   try {
     await connectDB();
     const userById = await User.findById(session.user.id)
-      .select({ username: 1, adminId: 1, availableMinutes: 1, status: 1, suspendReason: 1 })
+      .select({ username: 1, adminId: 1, availableMinutes: 1, status: 1, suspendReason: 1, createdAt: 1 })
       .lean();
 
-    let user = userById;
-    if (!user && session.user.username) {
-      // Fallback when session id is stale: first try same tenant, then global username.
-      const userByTenantUsername =
-        (session.user.adminId &&
-          (await User.findOne({
+    // Canonical user selection:
+    // 1) prefer latest record by username+tenant (handles recreated users with stale session id)
+    // 2) fallback to latest username globally
+    // 3) fallback to id-based user
+    const userByTenantUsername =
+      session.user.username && session.user.adminId
+        ? await User.findOne({
             username: session.user.username,
             adminId: session.user.adminId,
           })
             .sort({ createdAt: -1 })
-            .select({ username: 1, adminId: 1, availableMinutes: 1, status: 1, suspendReason: 1 })
-            .lean())) ||
-        (await User.findOne({ username: session.user.username })
-          .sort({ createdAt: -1 })
-          .select({ username: 1, adminId: 1, availableMinutes: 1, status: 1, suspendReason: 1 })
-          .lean());
-      if (userByTenantUsername) user = userByTenantUsername;
-    }
+            .select({ username: 1, adminId: 1, availableMinutes: 1, status: 1, suspendReason: 1, createdAt: 1 })
+            .lean()
+        : null;
+
+    const userByUsername =
+      session.user.username && !userByTenantUsername
+        ? await User.findOne({ username: session.user.username })
+            .sort({ createdAt: -1 })
+            .select({ username: 1, adminId: 1, availableMinutes: 1, status: 1, suspendReason: 1, createdAt: 1 })
+            .lean()
+        : null;
+
+    const user = userByTenantUsername || userByUsername || userById;
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
     const admin = await Admin.findById(user.adminId)

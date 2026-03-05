@@ -4,6 +4,7 @@ import User from '@/models/User';
 import Admin from '@/models/Admin';
 import { Types } from 'mongoose';
 import { hash } from 'bcryptjs';
+import { enforceRateLimit } from '@/lib/api-guard';
 
 type Body = {
   username?: string;
@@ -13,6 +14,9 @@ type Body = {
 
 export async function POST(req: NextRequest) {
   try {
+    const limited = enforceRateLimit(req, 'user-register', 12, 60_000);
+    if (limited) return limited;
+
     let body: Body;
     try {
       body = await req.json();
@@ -62,7 +66,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, message: 'User created' });
   } catch (error: any) {
     console.error('User register error:', error);
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({ error: message, details: String(error) }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to register user' }, { status: 500 });
   }
 }

@@ -5,6 +5,7 @@ import MasterAdmin from '@/models/MasterAdmin';
 import SystemState from '@/models/SystemState';
 import { hash } from 'bcryptjs';
 import { auth } from '@/lib/auth';
+import { enforceRateLimit } from '@/lib/api-guard';
 
 type Body = {
   username?: string;
@@ -13,6 +14,9 @@ type Body = {
 
 export async function POST(req: NextRequest) {
   try {
+    const limited = enforceRateLimit(req, 'admin-register', 8, 60_000);
+    if (limited) return limited;
+
     const session = await auth();
 
     let body: Body;
@@ -82,7 +86,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (error: any) {
     console.error('Admin register error:', error);
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({ error: message, details: String(error) }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to register admin' }, { status: 500 });
   }
 }

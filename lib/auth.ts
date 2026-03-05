@@ -5,6 +5,13 @@ import { connectDB } from "@/lib/mongodb";
 import MasterAdmin from "@/models/MasterAdmin";
 import Admin from "@/models/Admin";
 import User from "@/models/User";
+import {
+  clearFailedAuth,
+  ensureNotLocked,
+  getServerRequestIp,
+  makeThrottleKey,
+  registerFailedAuth,
+} from "@/lib/auth-security";
 
 type AuthUser = {
   id: string;
@@ -21,10 +28,23 @@ const credentialsProvider = Credentials({
   },
   authorize: async (creds) => {
     if (!creds?.username || !creds?.password) return null;
+    if (
+      process.env.NODE_ENV === "production" &&
+      (!process.env.NEXTAUTH_SECRET || process.env.NEXTAUTH_SECRET.length < 32)
+    ) {
+      console.error("NEXTAUTH_SECRET is missing or too short for production.");
+      return null;
+    }
     await connectDB();
 
     const username = typeof creds.username === "string" ? creds.username.trim() : "";
     const password = typeof creds.password === "string" ? creds.password : "";
+    const ip = await getServerRequestIp();
+    const throttleKey = makeThrottleKey("web", username, ip);
+    const lockState = await ensureNotLocked({ key: throttleKey });
+    if (!lockState.allowed) {
+      return null;
+    }
 
     const verifyPassword = async (stored: string | undefined | null, provided: string) => {
       if (!stored) return false;
@@ -42,6 +62,7 @@ const credentialsProvider = Credentials({
     // Check master admin
     const master = await MasterAdmin.findOne({ username }).lean();
     if (master && (await verifyPassword(master.password, password))) {
+      await clearFailedAuth({ key: throttleKey });
       return {
         id: master._id.toString(),
         role: "master",
@@ -52,6 +73,7 @@ const credentialsProvider = Credentials({
     // Check active admin
     const admin = await Admin.findOne({ username, status: "active" }).lean();
     if (admin && (await verifyPassword(admin.password, password))) {
+      await clearFailedAuth({ key: throttleKey });
       return {
         id: admin._id.toString(),
         role: "admin",
@@ -63,6 +85,7 @@ const credentialsProvider = Credentials({
     // Check user
     const user = await User.findOne({ username, status: { $ne: 'suspended' } }).lean();
     if (user && (await verifyPassword(user.password, password))) {
+      await clearFailedAuth({ key: throttleKey });
       return {
         id: user._id.toString(),
         role: "user",
@@ -71,11 +94,19 @@ const credentialsProvider = Credentials({
       } as AuthUser;
     }
 
+    await registerFailedAuth({
+      key: throttleKey,
+      username,
+      ip,
+      scope: "web",
+    });
+
     return null;
   },
 });
 
 export const { auth, handlers, signIn, signOut } = NextAuth({
+  secret: process.env.NEXTAUTH_SECRET,
   providers: [credentialsProvider],
   session: { strategy: "jwt" },
   trustHost: true,

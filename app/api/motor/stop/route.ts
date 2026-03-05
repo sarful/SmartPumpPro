@@ -4,6 +4,7 @@ import User from '@/models/User';
 import { calculateUsedMinutes, stopMotorForUser } from '@/lib/timer-engine';
 import { auth } from '@/lib/auth';
 import Queue from '@/models/Queue';
+import { enforceRateLimit } from '@/lib/api-guard';
 
 type StopMotorRequest = {
   userId?: string;
@@ -11,12 +12,21 @@ type StopMotorRequest = {
 
 export async function POST(req: NextRequest) {
   try {
+    const limited = enforceRateLimit(req, 'motor-stop', 40, 60_000);
+    if (limited) return limited;
+
     const session = await auth();
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { userId }: StopMotorRequest = await req.json();
+    let body: StopMotorRequest;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+    const { userId } = body;
 
     if (!userId || typeof userId !== 'string') {
       return NextResponse.json({ error: 'userId is required' }, { status: 400 });

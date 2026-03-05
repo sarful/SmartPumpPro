@@ -1,36 +1,85 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PumpPilot Web (Next.js)
 
-## Getting Started
+PumpPilot is a multi-tenant smart motor control platform (web backend + dashboard) for Admin/User/Master workflows, wallet billing, queue, load-shedding safety, and ESP32 polling.
 
-First, run the development server:
+## Requirements
+
+- Node.js 20+ (recommended)
+- npm 10+
+- MongoDB Atlas or self-hosted MongoDB 6+
+
+## 1) Environment Setup
+
+Copy `.env.example` to `.env.local` and set your values:
+
+```bash
+cp .env.example .env.local
+```
+
+Required:
+
+- `MONGODB_URI`
+- `NEXTAUTH_SECRET` (min 32 chars)
+
+## 2) Install Dependencies
+
+```bash
+npm install
+```
+
+## 3) Clean Install Flow (Codecanyon-ready)
+
+Run full setup:
+
+```bash
+npm run db:setup
+```
+
+This executes:
+
+1. `npm run install:check` -> validates env and DB connectivity
+2. `npm run db:migrate` -> creates/refreshes core indexes
+3. `npm run db:seed` -> creates master admin + global settings (idempotent)
+
+## 4) Run App
+
+Development:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Production:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run build
+npm run start
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Seeder Notes
 
-## Learn More
+Seeder env options:
 
-To learn more about Next.js, take a look at the following resources:
+- `SEED_MASTER_USERNAME` (default: `master`)
+- `SEED_MASTER_PASSWORD` (**required**, min 8 chars)
+- `SEED_DEMO_DATA` (`true/false`, default `false`)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Seeder is idempotent (safe to run again).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Extra Docs
 
-## Deploy on Vercel
+- Codecanyon install: `CODECANYON_INSTALL.md`
+- Packaging checklist: `CODECANYON_CHECKLIST.md`
+- Packaging structure: `CODECANYON_PACKAGE_STRUCTURE.md`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Codecanyon Package Build
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Prepare clean buyer package:
+
+```bash
+npm run package:codecanyon
+```
+
+Output folder:
+
+`dist/codecanyon/PumpPilot`

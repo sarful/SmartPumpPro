@@ -4,6 +4,7 @@ import User from '@/models/User';
 import Queue from '@/models/Queue';
 import { auth } from '@/lib/auth';
 import Admin from '@/models/Admin';
+import { enforceRateLimit } from '@/lib/api-guard';
 
 type Body = {
   userId?: string;
@@ -12,6 +13,9 @@ type Body = {
 
 export async function POST(req: NextRequest) {
   try {
+    const limited = enforceRateLimit(req, 'motor-extend', 30, 60_000);
+    if (limited) return limited;
+
     const session = await auth();
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -80,7 +84,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (error: any) {
     console.error('Motor extend error:', error);
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to extend motor time' }, { status: 500 });
   }
 }

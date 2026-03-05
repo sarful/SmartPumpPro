@@ -1362,48 +1362,50 @@ void loop() {
                     {u.suspendReason ? ` (${u.suspendReason})` : ""}
                   </td>
                     <td className="px-2 py-2">
-                      <button
-                        onClick={() => handleStartMotor(u._id, (u.motorRunningTime && u.motorRunningTime > 0) ? u.motorRunningTime : 5)}
-                        disabled={
-                          startLoadingUserId === u._id ||
-                          adminStatus !== "active" ||
-                          Boolean(loadShedding) ||
-                          deviceReady === false ||
-                          !internetOnline ||
-                          u.status === "suspended"
-                        }
-                        className="rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-800/50 disabled:opacity-60"
-                      >
-                        {startLoadingUserId === u._id ? "Starting..." : "Start Motor"}
-                      </button>
-                      <button
-                        onClick={() => handleStopResetMotor(u._id)}
-                        disabled={stopResetLoadingUserId === u._id}
-                        className="rounded-lg border border-cyan-500 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-800/50 disabled:opacity-60"
-                      >
-                        {stopResetLoadingUserId === u._id ? "Processing..." : "Stop/Reset"}
-                      </button>
-                      <button
-                        onClick={() => handleDeleteUser(u._id)}
-                        className="ml-2 rounded-lg border border-red-500 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
-                      >
-                        Delete
-                      </button>
-                      {u.status === "suspended" ? (
+                      <div className="flex min-w-[260px] flex-wrap gap-2">
                         <button
-                          onClick={() => handleUnsuspendUser(u._id)}
-                          className="ml-2 rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50"
+                          onClick={() => handleStartMotor(u._id, (u.motorRunningTime && u.motorRunningTime > 0) ? u.motorRunningTime : 5)}
+                          disabled={
+                            startLoadingUserId === u._id ||
+                            adminStatus !== "active" ||
+                            Boolean(loadShedding) ||
+                            deviceReady === false ||
+                            !internetOnline ||
+                            u.status === "suspended"
+                          }
+                          className="rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-800/50 disabled:opacity-60"
                         >
-                          Unsuspend
+                          {startLoadingUserId === u._id ? "Starting..." : "Start Motor"}
                         </button>
-                      ) : (
                         <button
-                          onClick={() => handleSuspendUser(u._id)}
-                          className="ml-2 rounded-lg border border-amber-500 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
+                          onClick={() => handleStopResetMotor(u._id)}
+                          disabled={stopResetLoadingUserId === u._id}
+                          className="rounded-lg border border-cyan-500 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-800/50 disabled:opacity-60"
                         >
-                          Suspend
+                          {stopResetLoadingUserId === u._id ? "Processing..." : "Stop/Reset"}
                         </button>
-                      )}
+                        <button
+                          onClick={() => handleDeleteUser(u._id)}
+                          className="rounded-lg border border-red-500 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
+                        >
+                          Delete
+                        </button>
+                        {u.status === "suspended" ? (
+                          <button
+                            onClick={() => handleUnsuspendUser(u._id)}
+                            className="rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50"
+                          >
+                            Unsuspend
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleSuspendUser(u._id)}
+                            className="rounded-lg border border-amber-500 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
+                          >
+                            Suspend
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
