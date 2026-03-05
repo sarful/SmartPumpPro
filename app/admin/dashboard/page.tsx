@@ -63,7 +63,7 @@ export default function AdminDashboardPage() {
   const effectiveRuntimeHold = displayLoadShedding || !displayInternetOnline;
 
   const esp32ArduinoCode = `#include <WiFiManager.h>
-#include <WiFiClientSecure.h>
+#include <WiFiClient.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
@@ -86,8 +86,9 @@ export default function AdminDashboardPage() {
 #define HTTP_TIMEOUT_MS 8000
 
 // ---- SERVER CONFIG ----
+// Admin-based config with your ADMIN_ID
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
-const char* API_HOST = "https://pms-two-kappa.vercel.app";
+const char* API_HOST = "http://192.168.2.102:3000";
 
 unsigned long lastPoll = 0;
 
@@ -132,9 +133,7 @@ void pollServer() {
                 localLS,
                 localDeviceReady);
 
-  WiFiClientSecure client;
-  client.setInsecure(); // quick test; use cert pinning for hardened security
-  client.setTimeout(HTTP_TIMEOUT_MS);
+  WiFiClient client;
 
   HTTPClient http;
   String url = String(API_HOST) +
@@ -145,7 +144,6 @@ void pollServer() {
   http.setConnectTimeout(HTTP_TIMEOUT_MS);
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.useHTTP10(true);
 
   if (!http.begin(client, url)) {
     Serial.println("[HTTP] begin failed");
@@ -155,10 +153,6 @@ void pollServer() {
   int code = http.GET();
   if (code != HTTP_CODE_OK) {
     Serial.printf("[HTTP] code=%d err=%s\\n", code, http.errorToString(code).c_str());
-    String location = http.header("Location");
-    if (location.length() > 0) {
-      Serial.printf("[HTTP] redirect=%s\\n", location.c_str());
-    }
     http.end();
     return;
   }
