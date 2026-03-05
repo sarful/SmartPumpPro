@@ -14,10 +14,12 @@ export async function GET(_req: NextRequest) {
     .select({ loadShedding: 1, status: 1, username: 1, suspendReason: 1, deviceReady: 1, devicePinHigh: 1, deviceLastSeenAt: 1 })
     .lean();
   if (!admin) return NextResponse.json({ error: 'Admin not found' }, { status: 404 });
+  const deviceOnline = isDeviceOnline(admin.deviceLastSeenAt);
   return NextResponse.json({
     admin: {
       ...admin,
-      deviceOnline: isDeviceOnline(admin.deviceLastSeenAt),
+      loadShedding: Boolean(admin.loadShedding) && deviceOnline,
+      deviceOnline,
       deviceReady: isDeviceReadyEffective(admin),
     },
   });

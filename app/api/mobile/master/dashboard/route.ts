@@ -5,6 +5,7 @@ import Admin from "@/models/Admin";
 import User from "@/models/User";
 import Queue from "@/models/Queue";
 import SystemState from "@/models/SystemState";
+import { isDeviceOnline, isDeviceReadyEffective } from "@/lib/device-readiness";
 
 type AdminLean = {
   _id: unknown;
@@ -13,6 +14,7 @@ type AdminLean = {
   loadShedding?: boolean;
   deviceReady?: boolean;
   devicePinHigh?: boolean;
+  deviceLastSeenAt?: Date | string | null;
   suspendReason?: string | null;
 };
 
@@ -42,7 +44,7 @@ export async function GET(req: NextRequest) {
       Queue.countDocuments({ status: "RUNNING" }),
       Queue.countDocuments({ status: "WAITING" }),
       Admin.find({})
-        .select({ username: 1, status: 1, loadShedding: 1, deviceReady: 1, devicePinHigh: 1, suspendReason: 1 })
+        .select({ username: 1, status: 1, loadShedding: 1, deviceReady: 1, devicePinHigh: 1, deviceLastSeenAt: 1, suspendReason: 1 })
         .lean(),
       User.find({})
         .select({
@@ -82,8 +84,9 @@ export async function GET(req: NextRequest) {
       id: String(admin._id),
       username: admin.username,
       status: admin.status,
-      loadShedding: Boolean(admin.loadShedding),
-      deviceReady: Boolean(admin.deviceReady),
+      loadShedding: Boolean(admin.loadShedding) && isDeviceOnline(admin.deviceLastSeenAt),
+      deviceOnline: isDeviceOnline(admin.deviceLastSeenAt),
+      deviceReady: isDeviceReadyEffective(admin),
       devicePinHigh: Boolean(admin.devicePinHigh),
       suspendReason: admin.suspendReason ?? null,
     }));

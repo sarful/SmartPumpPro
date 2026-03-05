@@ -79,6 +79,7 @@ export default function UserDashboardPage() {
   const [adminStatus, setAdminStatus] = useState<UserStatus>("active");
   const [adminReason, setAdminReason] = useState<string | null>(null);
   const [deviceReady, setDeviceReady] = useState<boolean | null>(null);
+  const [internetOnline, setInternetOnline] = useState(true);
 
   const role = session?.user?.role;
   const isUser = role === "user";
@@ -115,6 +116,10 @@ export default function UserDashboardPage() {
       ? adminReason || "You are suspended by admin/master."
       : null;
   const effectiveDeviceReady = realtimeDeviceReady ?? deviceReady;
+  const displayLoadShedding = loadShedding || effectiveDeviceReady === false;
+  const displayInternetOnline = internetOnline && effectiveDeviceReady !== false;
+  const runGateOk = !loadShedding && effectiveDeviceReady !== false && internetOnline;
+  const displayStatus: MotorStatus = runGateOk ? effectiveStatus : "HOLD";
 
   useEffect(() => {
     if (data?.motorStatus !== undefined) {
@@ -175,10 +180,26 @@ export default function UserDashboardPage() {
     return () => clearInterval(intervalId);
   }, [idsValid, isUser]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const updateOnline = () => setInternetOnline(window.navigator.onLine);
+    updateOnline();
+    window.addEventListener("online", updateOnline);
+    window.addEventListener("offline", updateOnline);
+    return () => {
+      window.removeEventListener("online", updateOnline);
+      window.removeEventListener("offline", updateOnline);
+    };
+  }, []);
+
   const handleStart = async () => {
     if (!idsValid) return;
 
     setRequestError(null);
+    if (!internetOnline) {
+      setRequestError("Internet offline. Motor start is blocked.");
+      return;
+    }
     setStartLoading(true);
 
     try {
@@ -321,14 +342,47 @@ export default function UserDashboardPage() {
           </div>
           )}
 
+        {!internetOnline && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Internet is offline. Motor remains on HOLD until connection is restored.
+          </div>
+        )}
+
         {requestError && (
           <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
             {requestError}
           </div>
         )}
 
+        <div className="mx-auto w-full max-w-5xl rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="text-sm font-semibold text-slate-700">System Readiness</div>
+          <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+              Device:{" "}
+              <span className={`inline-flex items-center gap-1.5 font-semibold ${effectiveDeviceReady === false ? "text-red-700" : "text-emerald-700"}`}>
+                <span className={`h-2.5 w-2.5 rounded-full ${effectiveDeviceReady === false ? "bg-red-500" : "bg-emerald-500"}`} />
+                {effectiveDeviceReady === false ? "Not Ready" : "Ready"}
+              </span>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+              Loadshedding:{" "}
+              <span className={`inline-flex items-center gap-1.5 font-semibold ${displayLoadShedding ? "text-red-700" : "text-emerald-700"}`}>
+                <span className={`h-2.5 w-2.5 rounded-full ${displayLoadShedding ? "bg-red-500" : "bg-emerald-500"}`} />
+                {displayLoadShedding ? "Yes" : "No"}
+              </span>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+              Internet:{" "}
+              <span className={`inline-flex items-center gap-1.5 font-semibold ${displayInternetOnline ? "text-emerald-700" : "text-red-700"}`}>
+                <span className={`h-2.5 w-2.5 rounded-full ${displayInternetOnline ? "bg-emerald-500" : "bg-red-500"}`} />
+                {displayInternetOnline ? "Online" : "Offline"}
+              </span>
+            </div>
+          </div>
+        </div>
+
         <div className="mx-auto grid w-full max-w-5xl gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <StatusCard title="Motor Status" value={effectiveStatus} status={effectiveStatus} />
+          <StatusCard title="Motor Status" value={displayStatus} status={displayStatus} />
           <InfoCard title="Remaining Minutes" value={`${effectiveRemaining}m`} />
           <InfoCard title="Available Minutes" value={`${availableMinutes}m`} />
 
@@ -366,7 +420,7 @@ export default function UserDashboardPage() {
         <div className="flex flex-col items-center gap-4">
           <div
             className={`w-full max-w-4xl rounded-2xl border border-gray-200 bg-white p-6 shadow-md ${
-              loadShedding || suspendedReason || effectiveDeviceReady === false ? "pointer-events-none opacity-60" : ""
+              loadShedding || suspendedReason || effectiveDeviceReady === false || !internetOnline ? "pointer-events-none opacity-60" : ""
             }`}
           >
             <div className="flex items-center justify-between">
@@ -394,6 +448,7 @@ export default function UserDashboardPage() {
                     ((queuePositionLive ?? queuePosition) ?? 0) > 0 ||
                     loadShedding ||
                     effectiveDeviceReady === false ||
+                    !internetOnline ||
                     lowBalance ||
                     suspendedReason !== null ||
                     startLoading ||
@@ -531,7 +586,7 @@ export default function UserDashboardPage() {
             {sessionStatus === "authenticated" && (
               <div className="flex items-center gap-2">
                 <a
-                  href="/api/history?format=csv&download=1&limit=200"
+                  href="/api/history?format=csv&download=1&limit=100"
                   className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-cyan-400 hover:text-cyan-700"
                 >
                   Download History

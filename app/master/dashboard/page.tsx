@@ -34,6 +34,7 @@ export default function MasterDashboardPage() {
 
   const [newAdmin, setNewAdmin] = useState({ username: "", password: "", status: "pending" });
   const [newUser, setNewUser] = useState({ username: "", password: "", adminId: "" });
+  const [internetOnline, setInternetOnline] = useState(true);
 
   const loadData = async () => {
     if (!isMaster) return;
@@ -92,6 +93,18 @@ export default function MasterDashboardPage() {
   useEffect(() => {
     if (status === "authenticated" && isMaster) loadData();
   }, [status, isMaster]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const updateOnline = () => setInternetOnline(window.navigator.onLine);
+    updateOnline();
+    window.addEventListener("online", updateOnline);
+    window.addEventListener("offline", updateOnline);
+    return () => {
+      window.removeEventListener("online", updateOnline);
+      window.removeEventListener("offline", updateOnline);
+    };
+  }, []);
 
   const copyAdminId = async (adminId: string) => {
     try {
@@ -286,7 +299,7 @@ export default function MasterDashboardPage() {
           </div>
           <div className="flex items-center gap-2">
             <a
-              href="/api/history?format=csv&download=1&limit=200"
+              href="/api/history?format=csv&download=1&limit=100"
               className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-slate-400 hover:text-slate-900"
             >
               Download History
@@ -361,11 +374,36 @@ export default function MasterDashboardPage() {
                     {copiedAdminId === ad._id ? "Copied" : "Copy"}
                   </button>
                 </div>
-                <div className="text-slate-600 text-xs">Load: {ad.loadShedding ? "ON" : "OFF"}</div>
-                <div className="text-slate-600 text-xs">
-                  Device: {ad.deviceReady ? "READY" : "NOT READY"}
-                  {ad.deviceOnline === false ? " (OFFLINE)" : ""}
-                </div>
+                {(() => {
+                  const displayLoadShedding = Boolean(ad.loadShedding) || ad.deviceReady === false;
+                  const displayInternetOnline =
+                    internetOnline && ad.deviceReady !== false && ad.deviceOnline !== false;
+                  return (
+                    <div className="mt-2 grid gap-1 text-xs">
+                      <div className="rounded-md border border-slate-200 bg-white px-2 py-1 text-slate-700">
+                        Device:{" "}
+                        <span className={`inline-flex items-center gap-1 font-semibold ${ad.deviceReady === false ? "text-red-700" : "text-emerald-700"}`}>
+                          <span className={`h-2 w-2 rounded-full ${ad.deviceReady === false ? "bg-red-500" : "bg-emerald-500"}`} />
+                          {ad.deviceReady === false ? "Not Ready" : "Ready"}
+                        </span>
+                      </div>
+                      <div className="rounded-md border border-slate-200 bg-white px-2 py-1 text-slate-700">
+                        Loadshedding:{" "}
+                        <span className={`inline-flex items-center gap-1 font-semibold ${displayLoadShedding ? "text-red-700" : "text-emerald-700"}`}>
+                          <span className={`h-2 w-2 rounded-full ${displayLoadShedding ? "bg-red-500" : "bg-emerald-500"}`} />
+                          {displayLoadShedding ? "Yes" : "No"}
+                        </span>
+                      </div>
+                      <div className="rounded-md border border-slate-200 bg-white px-2 py-1 text-slate-700">
+                        Internet:{" "}
+                        <span className={`inline-flex items-center gap-1 font-semibold ${displayInternetOnline ? "text-emerald-700" : "text-red-700"}`}>
+                          <span className={`h-2 w-2 rounded-full ${displayInternetOnline ? "bg-emerald-500" : "bg-red-500"}`} />
+                          {displayInternetOnline ? "Online" : "Offline"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div className="mt-2 flex flex-wrap gap-2">
                   {ad.status === "suspended" ? (
                     <button

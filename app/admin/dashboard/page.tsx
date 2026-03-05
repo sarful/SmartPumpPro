@@ -54,9 +54,13 @@ export default function AdminDashboardPage() {
   const [startLoadingUserId, setStartLoadingUserId] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
   const [espCodeType, setEspCodeType] = useState<"arduino" | "micropython" | "esp8266" | "ttgo" | "stm32">("arduino");
+  const [internetOnline, setInternetOnline] = useState(true);
 
   const isAdmin = session?.user?.role === "admin";
   const adminId = session?.user?.adminId ?? "";
+  const displayLoadShedding = Boolean(loadShedding) || deviceReady === false;
+  const displayInternetOnline = internetOnline && deviceReady !== false;
+  const effectiveRuntimeHold = displayLoadShedding || !displayInternetOnline;
 
   const esp32ArduinoCode = `#include <WiFiManager.h>
 #include <WiFiClientSecure.h>
@@ -953,6 +957,18 @@ void loop() {
     }
   }, [status, isAdmin]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const updateOnline = () => setInternetOnline(window.navigator.onLine);
+    updateOnline();
+    window.addEventListener("online", updateOnline);
+    window.addEventListener("offline", updateOnline);
+    return () => {
+      window.removeEventListener("online", updateOnline);
+      window.removeEventListener("offline", updateOnline);
+    };
+  }, []);
+
   const handleCreateUser = async () => {
     setCreateLoading(true);
     setError(null);
@@ -1061,6 +1077,10 @@ void loop() {
   const handleStartMotor = async (userId: string, requestedMinutes: number) => {
     setError(null);
     setStatusMessage(null);
+    if (!internetOnline) {
+      setError("Internet offline. Motor start is blocked.");
+      return;
+    }
     setStartLoadingUserId(userId);
     try {
       const res = await fetch("/api/motor/start", {
@@ -1169,7 +1189,7 @@ void loop() {
           </div>
           <div className="flex items-center gap-2">
             <a
-              href="/api/history?format=csv&download=1&limit=200"
+              href="/api/history?format=csv&download=1&limit=100"
               className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
             >
               Download History
@@ -1182,6 +1202,33 @@ void loop() {
             </button>
           </div>
         </header>
+
+        <section className="mx-auto w-full max-w-5xl rounded-xl border border-slate-800 bg-slate-950/70 p-4 shadow-lg shadow-slate-950/40">
+          <div className="text-sm font-semibold text-slate-200">System Readiness</div>
+          <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+            <div className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-200">
+              Device:{" "}
+              <span className={`inline-flex items-center gap-1.5 font-semibold ${deviceReady === false ? "text-red-300" : "text-emerald-300"}`}>
+                <span className={`h-2.5 w-2.5 rounded-full ${deviceReady === false ? "bg-red-500" : "bg-emerald-500"}`} />
+                {deviceReady === false ? "Not Ready" : "Ready"}
+              </span>
+            </div>
+            <div className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-200">
+              Loadshedding:{" "}
+              <span className={`inline-flex items-center gap-1.5 font-semibold ${displayLoadShedding ? "text-red-300" : "text-emerald-300"}`}>
+                <span className={`h-2.5 w-2.5 rounded-full ${displayLoadShedding ? "bg-red-500" : "bg-emerald-500"}`} />
+                {displayLoadShedding ? "Yes" : "No"}
+              </span>
+            </div>
+            <div className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-200">
+              Internet:{" "}
+              <span className={`inline-flex items-center gap-1.5 font-semibold ${displayInternetOnline ? "text-emerald-300" : "text-red-300"}`}>
+                <span className={`h-2.5 w-2.5 rounded-full ${displayInternetOnline ? "bg-emerald-500" : "bg-red-500"}`} />
+                {displayInternetOnline ? "Online" : "Offline"}
+              </span>
+            </div>
+          </div>
+        </section>
 
         {error && (
           <div className="rounded-lg border border-red-500/40 bg-red-900/40 px-3 py-2 text-sm text-red-100">
@@ -1302,7 +1349,9 @@ void loop() {
                     <td className="px-2 py-2">{u.username}</td>
                   <td className="px-2 py-2">{u.adminName ?? "You"}</td>
                   <td className="px-2 py-2">{u.availableMinutes} m</td>
-                  <td className="px-2 py-2">{u.motorStatus}</td>
+                  <td className="px-2 py-2">
+                    {u.motorStatus === "RUNNING" && effectiveRuntimeHold ? "HOLD" : u.motorStatus}
+                  </td>
                   <td className="px-2 py-2">{u.motorRunningTime ?? 0} m</td>
                   <td className="px-2 py-2">
                     {u.status ?? "active"}
@@ -1316,6 +1365,7 @@ void loop() {
                           adminStatus !== "active" ||
                           Boolean(loadShedding) ||
                           deviceReady === false ||
+                          !internetOnline ||
                           u.status === "suspended"
                         }
                         className="rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-800/50 disabled:opacity-60"
@@ -1379,7 +1429,9 @@ void loop() {
                     >
                       <div className="flex items-center justify-between">
                         <span>Pos #{q.position}</span>
-                        <span className="text-xs uppercase text-cyan-200">{q.status}</span>
+                        <span className="text-xs uppercase text-cyan-200">
+                          {q.status === "RUNNING" && effectiveRuntimeHold ? "HOLD" : q.status}
+                        </span>
                       </div>
                       <div className="mt-2 text-slate-300">User: {uname}</div>
                       <div className="text-slate-400">Req: {q.requestedMinutes}m</div>

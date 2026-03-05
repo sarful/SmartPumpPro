@@ -6,7 +6,7 @@ import Queue from '@/models/Queue';
 import { getQueuePosition } from '@/lib/queue-engine';
 import { tickRunningMotors } from '@/lib/timer-engine';
 import { activateLoadShedding, clearLoadShedding } from '@/lib/loadshedding-engine';
-import { isDeviceReadyEffective } from '@/lib/device-readiness';
+import { isDeviceOnline, isDeviceReadyEffective } from '@/lib/device-readiness';
 
 const BAD_REQUEST = { error: 'adminId is required' };
 
@@ -113,9 +113,11 @@ export async function GET(req: NextRequest) {
     }
 
     // Gate motor by load shedding + device readiness + suspend status.
+    const deviceOnline = isDeviceOnline(admin?.deviceLastSeenAt ?? null);
     const effectiveDeviceReady = isDeviceReadyEffective(admin);
+    const effectiveLoadShedding = Boolean(admin?.loadShedding) && deviceOnline;
     const adminBlocked =
-      (admin?.loadShedding ?? false) ||
+      effectiveLoadShedding ||
       !effectiveDeviceReady ||
       admin?.status === 'suspended';
 
@@ -166,7 +168,7 @@ export async function GET(req: NextRequest) {
       .lean();
 
     const userBlocked = freshUser.status === 'suspended';
-    const holdReason = admin?.loadShedding
+    const holdReason = effectiveLoadShedding
       ? 'loadshedding'
       : !effectiveDeviceReady
         ? 'device_not_ready'
@@ -179,7 +181,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       motorStatus: freshUser.motorStatus,
       remainingMinutes: freshUser.motorRunningTime ?? 0,
-      loadShedding: admin?.loadShedding ?? false,
+      loadShedding: effectiveLoadShedding,
       deviceReady: effectiveDeviceReady,
       devicePinHigh: admin?.devicePinHigh ?? false,
       adminStatus: admin?.status ?? 'active',

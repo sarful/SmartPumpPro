@@ -90,7 +90,7 @@ export async function GET(req: NextRequest) {
         username: admin.username,
         status: admin.status,
         suspendReason: admin.suspendReason ?? null,
-        loadShedding: Boolean(admin.loadShedding),
+        loadShedding: Boolean(admin.loadShedding) && isDeviceOnline(admin.deviceLastSeenAt),
         deviceReady: isDeviceReadyEffective(admin),
         deviceOnline: isDeviceOnline(admin.deviceLastSeenAt),
         devicePinHigh: Boolean(admin.devicePinHigh),

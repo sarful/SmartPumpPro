@@ -6,7 +6,7 @@ import Admin from "@/models/Admin";
 import Queue from "@/models/Queue";
 import MinuteRequest from "@/models/MinuteRequest";
 import { getQueuePosition } from "@/lib/queue-engine";
-import { isDeviceReadyEffective } from "@/lib/device-readiness";
+import { isDeviceOnline, isDeviceReadyEffective } from "@/lib/device-readiness";
 
 async function estimateWait(adminId: string, userId: string): Promise<number | null> {
   const entry = await Queue.findOne({
@@ -89,6 +89,8 @@ export async function GET(req: NextRequest) {
       .select({ minutes: 1, status: 1 })
       .lean();
 
+    const deviceOnline = isDeviceOnline(admin?.deviceLastSeenAt ?? null);
+
     return NextResponse.json({
       userId: String(user._id),
       username: user.username,
@@ -100,7 +102,7 @@ export async function GET(req: NextRequest) {
       queuePosition,
       runningUser: runningUser?.username ?? null,
       estimatedWait,
-      loadShedding: Boolean(admin?.loadShedding),
+      loadShedding: Boolean(admin?.loadShedding) && deviceOnline,
       deviceReady: isDeviceReadyEffective(admin),
       userStatus: user.status ?? "active",
       userSuspendReason: user.suspendReason ?? null,

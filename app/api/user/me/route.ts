@@ -4,7 +4,7 @@ import { connectDB } from '@/lib/mongodb';
 import User from '@/models/User';
 import { getQueuePosition } from '@/lib/queue-engine';
 import Admin from '@/models/Admin';
-import { isDeviceReadyEffective } from '@/lib/device-readiness';
+import { isDeviceOnline, isDeviceReadyEffective } from '@/lib/device-readiness';
 
 export async function GET(_req: NextRequest) {
   const session = await auth();
@@ -25,13 +25,15 @@ export async function GET(_req: NextRequest) {
 
     const queuePosition = await getQueuePosition(user.adminId, user._id);
 
+    const deviceOnline = isDeviceOnline(admin?.deviceLastSeenAt ?? null);
+
     return NextResponse.json({
       username: user.username,
       adminId: user.adminId,
       adminName: admin?.username ?? null,
       adminStatus: admin?.status ?? 'active',
       adminReason: admin?.suspendReason ?? null,
-      loadShedding: Boolean(admin?.loadShedding),
+      loadShedding: Boolean(admin?.loadShedding) && deviceOnline,
       deviceReady: admin ? isDeviceReadyEffective(admin) : null,
       status: user.status ?? 'active',
       suspendReason: user.suspendReason ?? null,

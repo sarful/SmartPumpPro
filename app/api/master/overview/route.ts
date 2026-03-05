@@ -36,6 +36,7 @@ export async function GET(_req: NextRequest) {
    // map adminId -> name for user records
   const adminsWithDeviceState = adminList.map((a: any) => ({
     ...a,
+    loadShedding: Boolean(a.loadShedding) && isDeviceOnline(a.deviceLastSeenAt),
     deviceOnline: isDeviceOnline(a.deviceLastSeenAt),
     deviceReady: isDeviceReadyEffective(a),
   }));
