@@ -63,7 +63,7 @@ export default function AdminDashboardPage() {
   const effectiveRuntimeHold = displayLoadShedding || !displayInternetOnline;
 
   const esp32ArduinoCode = `#include <WiFiManager.h>
-#include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
@@ -133,17 +133,20 @@ void pollServer() {
                 localLS,
                 localDeviceReady);
 
-  WiFiClient client;
+  WiFiClientSecure client;
+  client.setInsecure(); // quick test; use certificate pinning for hardened security
 
   HTTPClient http;
   String url = String(API_HOST) +
-               "/api/esp32/poll?adminId=" + ADMIN_ID +
+               "/api/esp32/poll/?adminId=" + ADMIN_ID +
                "&ls=" + (localLS ? "1" : "0") +
                "&dev=" + (localDeviceReady ? "1" : "0");
 
+  const char* headerKeys[] = {"Location"};
+  http.collectHeaders(headerKeys, 1);
   http.setConnectTimeout(HTTP_TIMEOUT_MS);
   http.setTimeout(HTTP_TIMEOUT_MS);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.setReuse(false);
 
   if (!http.begin(client, url)) {
     Serial.println("[HTTP] begin failed");
@@ -151,6 +154,16 @@ void pollServer() {
   }
 
   int code = http.GET();
+  if (code == 301 || code == 302 || code == 307 || code == 308) {
+    String location = http.header("Location");
+    Serial.printf("[HTTP] redirect %d -> %s\\n", code, location.c_str());
+    http.end();
+    if (location.length() == 0 || !http.begin(client, location)) {
+      Serial.println("[HTTP] redirect begin failed");
+      return;
+    }
+    code = http.GET();
+  }
   if (code != HTTP_CODE_OK) {
     Serial.printf("[HTTP] code=%d err=%s\\n", code, http.errorToString(code).c_str());
     http.end();
@@ -313,7 +326,7 @@ def poll_server(wlan):
 
     print("[PIN] loadRaw={} devRaw={} ls={} dev={}".format(raw_ls, raw_dev, local_ls, local_dev))
 
-    url = "{}/api/esp32/poll?adminId={}&ls={}&dev={}".format(
+    url = "{}/api/esp32/poll/?adminId={}&ls={}&dev={}".format(
         API_HOST,
         ADMIN_ID,
         "1" if local_ls else "0",
@@ -443,12 +456,15 @@ void pollServer() {
   HTTPClient http;
 
   String url = String(API_HOST) +
-               "/api/esp32/poll?adminId=" + ADMIN_ID +
+               "/api/esp32/poll/?adminId=" + ADMIN_ID +
                "&ls=" + (localLS ? "1" : "0") +
                "&dev=" + (localDeviceReady ? "1" : "0");
 
+  const char* headerKeys[] = {"Location"};
+  http.collectHeaders(headerKeys, 1);
   http.setConnectTimeout(HTTP_TIMEOUT_MS);
   http.setTimeout(HTTP_TIMEOUT_MS);
+  http.setReuse(false);
 
   if (!http.begin(*client, url)) {
     Serial.println("[HTTP] begin failed");
@@ -456,6 +472,16 @@ void pollServer() {
   }
 
   int code = http.GET();
+  if (code == 301 || code == 302 || code == 307 || code == 308) {
+    String location = http.header("Location");
+    Serial.printf("[HTTP] redirect %d -> %s\\n", code, location.c_str());
+    http.end();
+    if (location.length() == 0 || !http.begin(*client, location)) {
+      Serial.println("[HTTP] redirect begin failed");
+      return;
+    }
+    code = http.GET();
+  }
 
   if (code != HTTP_CODE_OK) {
     Serial.printf("[HTTP] code=%d err=%s\\n", code, http.errorToString(code).c_str());
@@ -639,7 +665,7 @@ void pollServer() {
   bool localLS = readLoadShedding();
   bool localDev = readDeviceReady();
 
-  String path = "/api/esp32/poll?adminId=" + String(ADMIN_ID) +
+  String path = "/api/esp32/poll/?adminId=" + String(ADMIN_ID) +
                 "&ls=" + String(localLS ? "1" : "0") +
                 "&dev=" + String(localDev ? "1" : "0");
 
@@ -837,7 +863,7 @@ void pollServer() {
   bool localLS = readLoadShedding();
   bool localDev = readDeviceReady();
 
-  String path = "/api/esp32/poll?adminId=" + String(ADMIN_ID) +
+  String path = "/api/esp32/poll/?adminId=" + String(ADMIN_ID) +
                 "&ls=" + (localLS ? "1" : "0") +
                 "&dev=" + (localDev ? "1" : "0");
 
