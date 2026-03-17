@@ -5,6 +5,7 @@ export type MotorStatus = 'OFF' | 'RUNNING' | 'HOLD';
 export interface UserDocument extends mongoose.Document {
   username: string;
   password: string;
+  rfidUid?: string;
   adminId: Types.ObjectId;
   availableMinutes: number;
   motorRunningTime: number;
@@ -23,6 +24,15 @@ const userSchema = new Schema<UserDocument>(
       required: true,
       unique: true,
       trim: true,
+    },
+    rfidUid: {
+      type: String,
+      trim: true,
+      set: (value: unknown) => {
+        if (typeof value !== 'string') return undefined;
+        const normalized = value.trim().toUpperCase();
+        return normalized.length > 0 ? normalized : undefined;
+      },
     },
     password: {
       type: String,
@@ -78,6 +88,13 @@ const userSchema = new Schema<UserDocument>(
 
 // Useful compound index for queries by admin and status/queue-related fields.
 userSchema.index({ adminId: 1, motorStatus: 1 });
+userSchema.index(
+  { adminId: 1, rfidUid: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { rfidUid: { $type: 'string' } },
+  },
+);
 
 export const User: Model<UserDocument> =
   mongoose.models.User || mongoose.model<UserDocument>('User', userSchema);

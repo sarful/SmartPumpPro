@@ -5,18 +5,31 @@ import User from '@/models/User';
 import Admin from '@/models/Admin';
 import { Types } from 'mongoose';
 import { hash } from 'bcryptjs';
+import { enforceRateLimit } from '@/lib/api-guard';
 
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
+  const limited = enforceRateLimit(req, 'master-users', 60, 60_000);
+  if (limited) return limited;
+
   const session = await auth();
   if (!session || session.user.role !== 'master') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   await connectDB();
-  const [users, admins] = await Promise.all([
+  const { searchParams } = new URL(req.url);
+  const page = Math.max(1, Number(searchParams.get('page') || 1));
+  const limit = Math.min(100, Math.max(1, Number(searchParams.get('limit') || 100)));
+  const skip = (page - 1) * limit;
+
+  const [users, admins, total] = await Promise.all([
     User.find({})
-      .select({ username: 1, adminId: 1, availableMinutes: 1, motorStatus: 1, motorRunningTime: 1, status: 1, suspendReason: 1 })
+      .select({ username: 1, adminId: 1, rfidUid: 1, availableMinutes: 1, motorStatus: 1, motorRunningTime: 1, status: 1, suspendReason: 1 })
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 })
       .lean(),
     Admin.find({}).select({ username: 1 }).lean(),
+    User.countDocuments({}),
   ]);
 
   const adminMap = Object.fromEntries(admins.map((a: any) => [String(a._id), a.username]));
@@ -25,10 +38,16 @@ export async function GET(_req: NextRequest) {
     adminName: adminMap[String(u.adminId)] ?? u.adminId,
   }));
 
-  return NextResponse.json({ users: usersWithAdmin });
+  return NextResponse.json({
+    users: usersWithAdmin,
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 1 },
+  });
 }
 
 export async function POST(req: NextRequest) {
+  const limited = enforceRateLimit(req, 'master-users-create', 30, 60_000);
+  if (limited) return limited;
+
   const session = await auth();
   if (!session || session.user.role !== 'master') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

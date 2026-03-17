@@ -13,8 +13,8 @@ type AdminRow = {
   devicePinHigh?: boolean;
   suspendReason?: string;
 };
-type UserRow = { _id: string; username: string; adminId: string; adminName?: string; availableMinutes: number; motorStatus: string; motorRunningTime?: number; status?: string; suspendReason?: string };
-type UserWithAdmin = { _id: string; username: string; adminId: string; adminName?: string; availableMinutes?: number; motorStatus?: string; motorRunningTime?: number; status?: string; suspendReason?: string };
+type UserRow = { _id: string; username: string; adminId: string; adminName?: string; rfidUid?: string; availableMinutes: number; motorStatus: string; motorRunningTime?: number; status?: string; suspendReason?: string };
+type UserWithAdmin = { _id: string; username: string; adminId: string; adminName?: string; rfidUid?: string; availableMinutes?: number; motorStatus?: string; motorRunningTime?: number; status?: string; suspendReason?: string };
 
 export default function MasterDashboardPage() {
   const { data: session, status } = useSession();
@@ -31,6 +31,10 @@ export default function MasterDashboardPage() {
   const [minuteDrafts, setMinuteDrafts] = useState<Record<string, string>>({});
   const [manualAdminApproval, setManualAdminApproval] = useState(true);
   const [savingApprovalMode, setSavingApprovalMode] = useState(false);
+  const [rfidTarget, setRfidTarget] = useState("");
+  const [rfidUid, setRfidUid] = useState("");
+  const [rfidLoading, setRfidLoading] = useState(false);
+  const [rfidMessage, setRfidMessage] = useState<string | null>(null);
 
   const [newAdmin, setNewAdmin] = useState({ username: "", password: "", status: "pending" });
   const [newUser, setNewUser] = useState({ username: "", password: "", adminId: "" });
@@ -268,6 +272,33 @@ export default function MasterDashboardPage() {
     loadData();
   };
 
+  const assignRfid = async (clearOnly = false) => {
+    setError(null);
+    setRfidMessage(null);
+    setRfidLoading(true);
+    try {
+      const payload = { userId: rfidTarget, rfidUid: clearOnly ? null : rfidUid.trim() };
+      const res = await fetch("/api/master/users/rfid", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "RFID update failed");
+      if (clearOnly) {
+        setRfidMessage("RFID cleared");
+        setRfidUid("");
+      } else {
+        setRfidMessage("RFID assigned");
+      }
+      loadData();
+    } catch (err: any) {
+      setError(err instanceof Error ? err.message : "RFID update failed");
+    } finally {
+      setRfidLoading(false);
+    }
+  };
+
   if (status === "loading") return <div className="p-6 text-slate-600">Loading session...</div>;
   if (!isMaster) {
     return (
@@ -440,6 +471,7 @@ export default function MasterDashboardPage() {
               <div key={u._id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900">
                 <div className="font-semibold">{u.username}</div>
                 <div className="text-slate-600 text-xs">Admin: {u.adminName ?? u.adminId}</div>
+                <div className="text-slate-600 text-xs">RFID: {u.rfidUid || "-"}</div>
                 <div className="text-slate-600 text-xs">Balance: {u.availableMinutes ?? 0} m</div>
                 <div className="text-slate-600 text-xs">Motor: {u.motorStatus ?? "OFF"}</div>
                 <div className="text-slate-600 text-xs">Running Time: {u.motorRunningTime ?? 0} m</div>
@@ -518,7 +550,7 @@ export default function MasterDashboardPage() {
           </div>
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-2">
+        <section className="grid gap-4 lg:grid-cols-3">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="text-sm text-slate-600">Create Admin</div>
             <input
@@ -584,6 +616,48 @@ export default function MasterDashboardPage() {
             >
               Create User
             </button>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="text-sm text-slate-600">RFID Card Registration</div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <select
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                value={rfidTarget}
+                onChange={(e) => setRfidTarget(e.target.value)}
+              >
+                <option value="">Select user</option>
+              {allUsers.map((u) => (
+                <option key={u._id} value={u._id}>
+                  {u.username}
+                  {u.rfidUid ? ` [${u.rfidUid}]` : ""}
+                  {` (${u.adminName ?? u.adminId})`}
+                </option>
+              ))}
+            </select>
+              <input
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 uppercase"
+                placeholder="RFID UID (UPPERCASE)"
+                value={rfidUid}
+                onChange={(e) => setRfidUid(e.target.value.toUpperCase())}
+              />
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() => assignRfid(false)}
+                disabled={rfidLoading || !rfidTarget || !rfidUid.trim()}
+                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60"
+              >
+                {rfidLoading ? "Assigning..." : "Assign"}
+              </button>
+              <button
+                onClick={() => assignRfid(true)}
+                disabled={rfidLoading || !rfidTarget}
+                className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Clear
+              </button>
+              {rfidMessage && <span className="self-center text-xs text-emerald-600">{rfidMessage}</span>}
+            </div>
           </div>
         </section>
 

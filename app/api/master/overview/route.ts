@@ -5,8 +5,12 @@ import Admin from '@/models/Admin';
 import User from '@/models/User';
 import Queue from '@/models/Queue';
 import { isDeviceOnline, isDeviceReadyEffective } from '@/lib/device-readiness';
+import { enforceRateLimit } from '@/lib/api-guard';
 
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
+  const limited = enforceRateLimit(req, 'master-overview', 30, 60_000);
+  if (limited) return limited;
+
   const session = await auth();
   if (!session || session.user.role !== 'master') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -24,6 +28,7 @@ export async function GET(_req: NextRequest) {
       .select({
         username: 1,
         adminId: 1,
+        rfidUid: 1,
         status: 1,
         suspendReason: 1,
         availableMinutes: 1,

@@ -6,6 +6,7 @@ import { useSession, signOut } from "next-auth/react";
 type UserRow = {
   _id: string;
   username: string;
+  rfidUid?: string;
   availableMinutes: number;
   motorStatus: string;
   motorRunningTime?: number;
@@ -36,6 +37,8 @@ export default function AdminDashboardPage() {
   const [deviceReady, setDeviceReady] = useState<boolean | null>(null);
   const [adminStatus, setAdminStatus] = useState<string>("active");
   const [adminSuspendReason, setAdminSuspendReason] = useState<string | null>(null);
+  const [cardModeActive, setCardModeActive] = useState(false);
+  const [cardActiveUserId, setCardActiveUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +47,10 @@ export default function AdminDashboardPage() {
   const [rechargeTarget, setRechargeTarget] = useState<string>("");
   const [rechargeMinutes, setRechargeMinutes] = useState(0);
   const [rechargeLoading, setRechargeLoading] = useState(false);
+  const [rfidTarget, setRfidTarget] = useState<string>("");
+  const [rfidUid, setRfidUid] = useState<string>("");
+  const [rfidLoading, setRfidLoading] = useState(false);
+  const [rfidMessage, setRfidMessage] = useState<string | null>(null);
   const [requests, setRequests] = useState<
     { _id: string; userId: string | { _id: string; username: string }; minutes: number; createdAt: string }[]
   >([]);
@@ -972,6 +979,8 @@ void loop() {
         setDeviceReady(Boolean(statusJson.admin.deviceReady));
         setAdminStatus(statusJson.admin.status ?? "active");
         setAdminSuspendReason(statusJson.admin.suspendReason ?? null);
+        setCardModeActive(Boolean(statusJson.admin.cardModeActive));
+        setCardActiveUserId(statusJson.admin.cardActiveUserId ?? null);
       }
       if (reqRes.ok) setRequests(reqJson.requests ?? []);
     } catch (err: any) {
@@ -1036,6 +1045,36 @@ void loop() {
       setError(err instanceof Error ? err.message : "Recharge failed");
     } finally {
       setRechargeLoading(false);
+    }
+  };
+
+  const handleAssignRfid = async (clearOnly = false) => {
+    setRfidLoading(true);
+    setError(null);
+    setRfidMessage(null);
+    try {
+      const payload = {
+        userId: rfidTarget,
+        rfidUid: clearOnly ? null : rfidUid.trim(),
+      };
+      const res = await fetch("/api/admin/users/rfid", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await readJson(res);
+      if (!res.ok) throw new Error(json.error || "RFID update failed");
+      if (clearOnly) {
+        setRfidMessage("RFID cleared");
+        setRfidUid("");
+      } else {
+        setRfidMessage("RFID assigned");
+      }
+      await loadData();
+    } catch (err: any) {
+      setError(err instanceof Error ? err.message : "RFID update failed");
+    } finally {
+      setRfidLoading(false);
     }
   };
 
@@ -1296,7 +1335,7 @@ void loop() {
           <div className="text-sm text-slate-300">Loading data...</div>
         ) : (
           <>
-            <section className="mx-auto grid w-full max-w-5xl gap-4 lg:grid-cols-2">
+            <section className="mx-auto grid w-full max-w-5xl gap-4 lg:grid-cols-3">
               <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 shadow-xl shadow-slate-950/40">
                 <div className="text-sm text-slate-400">Create User</div>
                 <input
@@ -1351,6 +1390,46 @@ void loop() {
                   {rechargeLoading ? "Recharging..." : "Recharge"}
                 </button>
               </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 shadow-xl shadow-slate-950/40">
+                <div className="text-sm text-slate-400">RFID Card Registration</div>
+                <select
+                  className="mt-3 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+                  value={rfidTarget}
+                  onChange={(e) => setRfidTarget(e.target.value)}
+                >
+                  <option value="">Select user</option>
+                  {users.map((u) => (
+                    <option key={u._id} value={u._id}>
+                      {u.username}
+                      {u.rfidUid ? ` (${u.rfidUid})` : ""}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100 uppercase"
+                  placeholder="RFID UID (UPPERCASE)"
+                  value={rfidUid}
+                  onChange={(e) => setRfidUid(e.target.value.toUpperCase())}
+                />
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => handleAssignRfid(false)}
+                    disabled={rfidLoading || !rfidTarget || !rfidUid.trim()}
+                    className="flex-1 rounded-xl bg-indigo-400 px-4 py-2 text-sm font-semibold text-slate-900 shadow-lg shadow-indigo-900/30 hover:bg-indigo-300 disabled:opacity-60"
+                  >
+                    {rfidLoading ? "Assigning..." : "Assign"}
+                  </button>
+                  <button
+                    onClick={() => handleAssignRfid(true)}
+                    disabled={rfidLoading || !rfidTarget}
+                    className="flex-1 rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800/40 disabled:opacity-60"
+                  >
+                    Clear
+                  </button>
+                </div>
+                {rfidMessage && <div className="mt-2 text-xs text-emerald-300">{rfidMessage}</div>}
+              </div>
             </section>
 
             <section className="mx-auto w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
@@ -1365,11 +1444,13 @@ void loop() {
               <thead className="text-slate-400">
                 <tr>
                   <th className="px-2 py-2 text-left">Username</th>
+                  <th className="px-2 py-2 text-left">RFID</th>
                   <th className="px-2 py-2 text-left">Admin</th>
                   <th className="px-2 py-2 text-left">Available</th>
                   <th className="px-2 py-2 text-left">Motor</th>
                   <th className="px-2 py-2 text-left">Running Time</th>
                   <th className="px-2 py-2 text-left">Status</th>
+                  <th className="px-2 py-2 text-left">Use</th>
                   <th className="px-2 py-2 text-left">Actions</th>
                 </tr>
               </thead>
@@ -1377,6 +1458,7 @@ void loop() {
                 {users.map((u) => (
                   <tr key={u._id}>
                     <td className="px-2 py-2">{u.username}</td>
+                    <td className="px-2 py-2 text-xs text-slate-300">{u.rfidUid || "-"}</td>
                   <td className="px-2 py-2">{u.adminName ?? "You"}</td>
                   <td className="px-2 py-2">{u.availableMinutes} m</td>
                   <td className="px-2 py-2">
@@ -1386,6 +1468,13 @@ void loop() {
                   <td className="px-2 py-2">
                     {u.status ?? "active"}
                     {u.suspendReason ? ` (${u.suspendReason})` : ""}
+                  </td>
+                  <td className="px-2 py-2 text-xs text-slate-300">
+                    {cardModeActive && cardActiveUserId === u._id
+                      ? "Card"
+                      : u.motorStatus === "RUNNING"
+                        ? "Web"
+                        : "-"}
                   </td>
                     <td className="px-2 py-2">
                       <div className="flex min-w-[260px] flex-wrap gap-2">
@@ -1437,7 +1526,7 @@ void loop() {
                 ))}
                   {users.length === 0 && (
                     <tr>
-                      <td className="px-2 py-3 text-slate-400" colSpan={6}>
+                      <td className="px-2 py-3 text-slate-400" colSpan={8}>
                         No users yet.
                       </td>
                     </tr>

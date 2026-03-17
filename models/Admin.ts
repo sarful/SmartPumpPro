@@ -11,6 +11,14 @@ export interface AdminDocument extends mongoose.Document {
   deviceLastSeenAt?: Date | null;
   createdAt: Date;
   suspendReason?: string;
+  cardModeActive?: boolean;
+  cardActiveUid?: string | null;
+  cardActiveUserId?: Types.ObjectId | null;
+  cardActivatedAt?: Date | null;
+  cardLastSeenAt?: Date | null;
+  cardBilledMinutes?: number;
+  cardModeMessage?: string | null;
+  cardModeStopReason?: 'removed' | 'insufficient' | 'admin_override' | 'unknown_uid' | null;
 }
 
 const adminSchema = new Schema<AdminDocument>(
@@ -50,6 +58,42 @@ const adminSchema = new Schema<AdminDocument>(
     },
     deviceLastSeenAt: {
       type: Date,
+      default: null,
+    },
+    cardModeActive: {
+      type: Boolean,
+      default: false,
+    },
+    cardActiveUid: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    cardActiveUserId: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    cardActivatedAt: {
+      type: Date,
+      default: null,
+    },
+    cardLastSeenAt: {
+      type: Date,
+      default: null,
+    },
+    cardBilledMinutes: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    cardModeMessage: {
+      type: String,
+      default: null,
+    },
+    cardModeStopReason: {
+      type: String,
+      enum: ['removed', 'insufficient', 'admin_override', 'unknown_uid', null],
       default: null,
     },
     createdAt: {
