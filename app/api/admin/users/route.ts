@@ -13,7 +13,15 @@ export async function GET(_req: NextRequest) {
   await connectDB();
   const admin = await Admin.findById(session.user.adminId).select({ username: 1 }).lean();
   const users = await User.find({ adminId: session.user.adminId })
-    .select({ username: 1, availableMinutes: 1, motorStatus: 1, motorRunningTime: 1, status: 1, suspendReason: 1 })
+    .select({
+      username: 1,
+      rfidUid: 1,
+      availableMinutes: 1,
+      motorStatus: 1,
+      motorRunningTime: 1,
+      status: 1,
+      suspendReason: 1,
+    })
     .lean();
   const usersWithAdmin = users.map((u: any) => ({
     ...u,
