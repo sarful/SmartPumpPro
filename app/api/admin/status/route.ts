@@ -12,7 +12,18 @@ export async function GET(_req: NextRequest) {
   }
   await connectDB();
   const admin = await Admin.findById(session.user.adminId)
-    .select({ loadShedding: 1, status: 1, username: 1, suspendReason: 1, deviceReady: 1, devicePinHigh: 1, deviceLastSeenAt: 1 })
+    .select({
+      loadShedding: 1,
+      status: 1,
+      username: 1,
+      suspendReason: 1,
+      deviceReady: 1,
+      devicePinHigh: 1,
+      deviceLastSeenAt: 1,
+      cardModeActive: 1,
+      cardActiveUserId: 1,
+      cardModeMessage: 1,
+    })
     .lean();
   if (!admin) return NextResponse.json({ error: 'Admin not found' }, { status: 404 });
   const deviceOnline = isDeviceOnline(admin.deviceLastSeenAt);
@@ -30,6 +41,7 @@ export async function GET(_req: NextRequest) {
   return NextResponse.json({
     admin: {
       ...admin,
+      cardActiveUserId: admin.cardActiveUserId ? String(admin.cardActiveUserId) : null,
       loadShedding: effectiveLoadShedding,
       deviceOnline,
       deviceReady: effectiveDeviceReady,

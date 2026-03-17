@@ -22,6 +22,8 @@ type RealtimePayload = {
   queuePosition?: number | null;
   runningUser?: string | null;
   estimatedWait?: number | null;
+  cardModeActive?: boolean;
+  cardModeMessage?: string | null;
 };
 
 type UserMePayload = {
@@ -109,6 +111,8 @@ export default function UserDashboardPage() {
   const realtimeDeviceReady = data?.deviceReady;
   const queuePositionLive = data?.queuePosition;
   const runningUser = data?.runningUser ?? null;
+  const cardModeActive = Boolean(data?.cardModeActive);
+  const cardModeMessage = data?.cardModeMessage || "Now using card";
   const lowBalance = availableMinutes < 5;
   const estimatedWait = data?.estimatedWait ?? null;
   const queueValue = localQueueCleared ? null : queuePositionLive ?? queuePosition;
@@ -127,6 +131,7 @@ export default function UserDashboardPage() {
   const displayInternetOnline = internetOnline && effectiveDeviceReady !== false;
   const runGateOk = !loadShedding && effectiveDeviceReady !== false && internetOnline;
   const displayStatus: MotorStatus = runGateOk ? effectiveStatus : "HOLD";
+  const cardModeBlocked = cardModeActive;
 
   useEffect(() => {
     if (data?.motorStatus !== undefined) {
@@ -369,6 +374,12 @@ export default function UserDashboardPage() {
           </div>
         )}
 
+        {cardModeActive && (
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+            {cardModeMessage}
+          </div>
+        )}
+
         {loadShedding && (
           <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
             Load shedding active now. Motor is on HOLD until power resumes.
@@ -459,12 +470,13 @@ export default function UserDashboardPage() {
           {pendingRequest && <InfoCard title="Request Minutes" value={`Pending approval: ${pendingRequest.minutes}m`} subtle />}
         </div>
 
-        <div className="flex flex-col items-center gap-4">
-          <div
-            className={`w-full max-w-4xl rounded-2xl border border-gray-200 bg-white p-6 shadow-md ${
-              loadShedding || suspendedReason || effectiveDeviceReady === false || !internetOnline ? "pointer-events-none opacity-60" : ""
-            }`}
-          >
+        {!cardModeBlocked && (
+          <div className="flex flex-col items-center gap-4">
+            <div
+              className={`w-full max-w-4xl rounded-2xl border border-gray-200 bg-white p-6 shadow-md ${
+                loadShedding || suspendedReason || effectiveDeviceReady === false || !internetOnline ? "pointer-events-none opacity-60" : ""
+              }`}
+            >
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-slate-500">Set Minutes</div>
@@ -493,6 +505,7 @@ export default function UserDashboardPage() {
                     !internetOnline ||
                     lowBalance ||
                     suspendedReason !== null ||
+                    cardModeBlocked ||
                     startLoading ||
                     !idsValid
                   }
@@ -502,14 +515,14 @@ export default function UserDashboardPage() {
                 <button
                   onClick={handleStop}
                   className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={stopLoading || !idsValid || suspendedReason !== null}
+                  disabled={stopLoading || !idsValid || suspendedReason !== null || cardModeBlocked}
                 >
                   {stopLoading ? "Stopping..." : "Stop Motor"}
                 </button>
               </div>
             </div>
 
-            {effectiveStatus === "RUNNING" && !loadShedding && (
+            {effectiveStatus === "RUNNING" && !loadShedding && !cardModeBlocked && (
               <div className="mt-3">
                 <button
                   onClick={async () => {
@@ -538,7 +551,7 @@ export default function UserDashboardPage() {
                       setExtendLoading(false);
                     }
                   }}
-                  disabled={extendLoading || availableMinutes <= 0 || lowBalance || suspendedReason !== null}
+                  disabled={extendLoading || availableMinutes <= 0 || lowBalance || suspendedReason !== null || cardModeBlocked}
                   className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-600 disabled:opacity-50"
                 >
                   {extendLoading ? "Adding..." : "+ Add 1 minute"}
@@ -546,8 +559,9 @@ export default function UserDashboardPage() {
                 {extendError && <div className="mt-2 text-xs text-red-600">Extend error: {extendError}</div>}
               </div>
             )}
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="mx-auto flex w-full max-w-5xl items-center justify-center">
           <button
