@@ -58,13 +58,24 @@ export async function GET(req: NextRequest) {
     await connectDB();
 
     const admin = await Admin.findById(adminId)
-      .select({ username: 1, status: 1, suspendReason: 1, loadShedding: 1, deviceReady: 1, devicePinHigh: 1, deviceLastSeenAt: 1 })
+      .select({
+        username: 1,
+        status: 1,
+        suspendReason: 1,
+        loadShedding: 1,
+        deviceReady: 1,
+        devicePinHigh: 1,
+        deviceLastSeenAt: 1,
+        cardModeActive: 1,
+        cardActiveUserId: 1,
+      })
       .lean();
     if (!admin) return NextResponse.json({ error: "Admin not found" }, { status: 404 });
 
     const users = await User.find({ adminId })
       .select({
         username: 1,
+        rfidUid: 1,
         availableMinutes: 1,
         motorStatus: 1,
         motorRunningTime: 1,
@@ -114,11 +125,19 @@ export async function GET(req: NextRequest) {
       users: (users as UserLean[]).map((u) => ({
         id: String(u._id),
         username: u.username,
+        rfidUid: (u as any).rfidUid ?? null,
         availableMinutes: u.availableMinutes ?? 0,
         motorStatus: u.motorStatus ?? "OFF",
         motorRunningTime: u.motorRunningTime ?? 0,
         status: u.status ?? "active",
         suspendReason: u.suspendReason ?? null,
+        useSource:
+          Boolean((admin as any)?.cardModeActive) &&
+          String((admin as any)?.cardActiveUserId ?? "") === String(u._id)
+            ? "Card"
+            : u.motorStatus === "RUNNING"
+              ? "Web"
+              : null,
       })),
       pendingRequests: (requests as MinuteRequestLean[]).map((r) => ({
         id: String(r._id),

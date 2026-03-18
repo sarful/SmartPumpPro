@@ -72,7 +72,16 @@ export async function GET(req: NextRequest) {
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
     const admin = await Admin.findById(user.adminId)
-      .select({ username: 1, status: 1, suspendReason: 1, loadShedding: 1, deviceReady: 1, deviceLastSeenAt: 1 })
+      .select({
+        username: 1,
+        status: 1,
+        suspendReason: 1,
+        loadShedding: 1,
+        deviceReady: 1,
+        deviceLastSeenAt: 1,
+        cardModeActive: 1,
+        cardModeMessage: 1,
+      })
       .lean();
 
     const runningUser = await User.findOne({ adminId: user.adminId, motorStatus: "RUNNING" })
@@ -122,6 +131,8 @@ export async function GET(req: NextRequest) {
       userSuspendReason: user.suspendReason ?? null,
       adminStatus: admin?.status ?? "active",
       adminSuspendReason: admin?.suspendReason ?? null,
+      cardModeActive: Boolean((admin as any)?.cardModeActive),
+      cardModeMessage: (admin as any)?.cardModeMessage ?? null,
       pendingMinuteRequest: pendingRequest
         ? { minutes: pendingRequest.minutes, status: pendingRequest.status }
         : null,

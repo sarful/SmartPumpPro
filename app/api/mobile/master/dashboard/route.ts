@@ -16,12 +16,15 @@ type AdminLean = {
   devicePinHigh?: boolean;
   deviceLastSeenAt?: Date | string | null;
   suspendReason?: string | null;
+  cardModeActive?: boolean;
+  cardActiveUserId?: unknown;
 };
 
 type UserLean = {
   _id: unknown;
   username?: string;
   adminId?: unknown;
+  rfidUid?: string | null;
   status?: string;
   suspendReason?: string | null;
   availableMinutes?: number;
@@ -44,12 +47,23 @@ export async function GET(req: NextRequest) {
       Queue.countDocuments({ status: "RUNNING" }),
       Queue.countDocuments({ status: "WAITING" }),
       Admin.find({})
-        .select({ username: 1, status: 1, loadShedding: 1, deviceReady: 1, devicePinHigh: 1, deviceLastSeenAt: 1, suspendReason: 1 })
+        .select({
+          username: 1,
+          status: 1,
+          loadShedding: 1,
+          deviceReady: 1,
+          devicePinHigh: 1,
+          deviceLastSeenAt: 1,
+          suspendReason: 1,
+          cardModeActive: 1,
+          cardActiveUserId: 1,
+        })
         .lean(),
       User.find({})
         .select({
           username: 1,
           adminId: 1,
+          rfidUid: 1,
           status: 1,
           suspendReason: 1,
           availableMinutes: 1,
@@ -67,18 +81,38 @@ export async function GET(req: NextRequest) {
     const adminList = admins as AdminLean[];
     const userList = users as UserLean[];
 
-    const adminNameMap = Object.fromEntries(adminList.map((admin) => [String(admin._id), admin.username]));
-    const usersWithAdmin = userList.map((user) => ({
-      id: String(user._id),
-      username: user.username,
-      adminId: String(user.adminId),
-      adminName: adminNameMap[String(user.adminId)] ?? String(user.adminId),
-      status: user.status ?? "active",
-      suspendReason: user.suspendReason ?? null,
-      availableMinutes: user.availableMinutes ?? 0,
-      motorStatus: user.motorStatus ?? "OFF",
-      motorRunningTime: user.motorRunningTime ?? 0,
-    }));
+    const adminMetaMap = Object.fromEntries(
+      adminList.map((admin) => [
+        String(admin._id),
+        {
+          name: admin.username,
+          cardModeActive: Boolean(admin.cardModeActive),
+          cardActiveUserId: admin.cardActiveUserId ? String(admin.cardActiveUserId) : null,
+        },
+      ]),
+    );
+    const usersWithAdmin = userList.map((user) => {
+      const meta = adminMetaMap[String(user.adminId)];
+      const useSource =
+        meta?.cardModeActive && meta.cardActiveUserId === String(user._id)
+          ? "Card"
+          : user.motorStatus === "RUNNING"
+            ? "Web"
+            : "-";
+      return {
+        id: String(user._id),
+        username: user.username,
+        adminId: String(user.adminId),
+        adminName: meta?.name ?? String(user.adminId),
+        rfidUid: user.rfidUid ?? null,
+        status: user.status ?? "active",
+        suspendReason: user.suspendReason ?? null,
+        availableMinutes: user.availableMinutes ?? 0,
+        motorStatus: user.motorStatus ?? "OFF",
+        motorRunningTime: user.motorRunningTime ?? 0,
+        useSource,
+      };
+    });
 
     const adminsList = adminList.map((admin) => ({
       id: String(admin._id),
