@@ -259,8 +259,16 @@ export default function UserDashboardPage() {
       });
 
       if (!res.ok) {
-        const msg = await res.text();
-        throw new Error(msg || "Failed to start motor");
+        let msg = "Failed to start motor";
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const json = (await res.json()) as { error?: string };
+          msg = json.error || msg;
+        } else {
+          const text = await res.text();
+          msg = text || msg;
+        }
+        throw new Error(msg);
       }
 
       const startResult = (await res.json()) as { status: "RUNNING" | "WAITING"; queuePosition?: number };
@@ -292,8 +300,16 @@ export default function UserDashboardPage() {
       });
 
       if (!res.ok) {
-        const msg = await res.text();
-        throw new Error(msg || "Failed to stop motor");
+        let msg = "Failed to stop motor";
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const json = (await res.json()) as { error?: string };
+          msg = json.error || msg;
+        } else {
+          const text = await res.text();
+          msg = text || msg;
+        }
+        throw new Error(msg);
       }
 
       await res.json();

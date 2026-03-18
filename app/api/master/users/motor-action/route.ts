@@ -98,8 +98,12 @@ export async function POST(req: NextRequest) {
         typeof requestedMinutes === "number" && requestedMinutes > 0
           ? Math.floor(requestedMinutes)
           : Math.max(Math.floor(user.lastSetMinutes || 0), 5);
+      if (minutes < 5) {
+        return NextResponse.json({ error: "Minimum 5 minutes required" }, { status: 400 });
+      }
 
-      if (user.availableMinutes < minutes) {
+      const minRequired = Math.max(minutes, 5);
+      if (user.availableMinutes < minRequired) {
         return NextResponse.json(
           { error: `Insufficient minutes. Need ${minutes}m, available ${user.availableMinutes}m` },
           { status: 400 },

@@ -55,8 +55,12 @@ export async function POST(req: NextRequest) {
       typeof body.requestedMinutes === "number" && body.requestedMinutes > 0
         ? Math.floor(body.requestedMinutes)
         : Math.max(Math.floor(user.lastSetMinutes || user.motorRunningTime || 0), 5);
+    if (requestedMinutes < 5) {
+      return NextResponse.json({ error: "Minimum 5 minutes required" }, { status: 400 });
+    }
 
-    if ((user.availableMinutes ?? 0) < requestedMinutes) {
+    const minRequired = Math.max(requestedMinutes, 5);
+    if ((user.availableMinutes ?? 0) < minRequired) {
       return NextResponse.json(
         { error: `Insufficient minutes. Need ${requestedMinutes}m, available ${user.availableMinutes ?? 0}m` },
         { status: 400 },

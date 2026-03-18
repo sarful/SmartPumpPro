@@ -42,6 +42,9 @@ export async function POST(req: NextRequest) {
     ) {
       return NextResponse.json({ error: 'requestedMinutes must be > 0' }, { status: 400 });
     }
+    if (requestedMinutes < 5) {
+      return NextResponse.json({ error: 'Minimum 5 minutes required' }, { status: 400 });
+    }
 
     await connectDB();
 
@@ -75,7 +78,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Your device is not ready' }, { status: 403 });
     }
 
-    if (user.availableMinutes < requestedMinutes) {
+    const minRequired = Math.max(requestedMinutes, 5);
+    if ((user.availableMinutes ?? 0) < minRequired) {
       return NextResponse.json({ error: 'Insufficient minutes' }, { status: 400 });
     }
 
