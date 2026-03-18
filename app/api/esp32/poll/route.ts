@@ -408,6 +408,14 @@ export async function GET(req: NextRequest) {
             ? 'user_suspended'
             : null;
 
+    let cardActiveUser: string | null = null;
+    if (admin?.cardModeActive && admin.cardActiveUserId) {
+      const cardUserDoc = await User.findById(admin.cardActiveUserId)
+        .select({ username: 1 })
+        .lean();
+      cardActiveUser = cardUserDoc?.username ?? null;
+    }
+
     await logReadinessTransitions({
       adminId: freshUser.adminId.toString(),
       userId: freshUser._id.toString(),
@@ -431,6 +439,7 @@ export async function GET(req: NextRequest) {
       devicePinHigh: admin?.devicePinHigh ?? false,
       cardModeActive: Boolean(admin?.cardModeActive),
       cardModeMessage: admin?.cardModeMessage ?? null,
+      cardActiveUser,
       cardActiveUid: admin?.cardActiveUid ?? null,
       cardActiveUserId: admin?.cardActiveUserId ?? null,
       adminStatus: admin?.status ?? 'active',

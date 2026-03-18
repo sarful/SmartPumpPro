@@ -24,6 +24,7 @@ type RealtimePayload = {
   estimatedWait?: number | null;
   cardModeActive?: boolean;
   cardModeMessage?: string | null;
+  cardActiveUser?: string | null;
 };
 
 type UserMePayload = {
@@ -113,6 +114,7 @@ export default function UserDashboardPage() {
   const runningUser = data?.runningUser ?? null;
   const cardModeActive = Boolean(data?.cardModeActive);
   const cardModeMessage = data?.cardModeMessage || "Now using card";
+  const cardActiveUser = data?.cardActiveUser ?? null;
   const lowBalance = availableMinutes < 5;
   const estimatedWait = data?.estimatedWait ?? null;
   const queueValue = localQueueCleared ? null : queuePositionLive ?? queuePosition;
@@ -386,6 +388,11 @@ export default function UserDashboardPage() {
               <div className="text-base font-semibold text-indigo-900">
                 {cardModeMessage}
               </div>
+              {cardActiveUser && (
+                <div className="text-xs text-indigo-600">
+                  Card user: <span className="font-semibold">{cardActiveUser}</span>
+                </div>
+              )}
               <div className="text-xs text-indigo-600">
                 Dashboard controls are locked while the card is active.
               </div>

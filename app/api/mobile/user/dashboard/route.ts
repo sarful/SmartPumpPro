@@ -81,6 +81,7 @@ export async function GET(req: NextRequest) {
         deviceLastSeenAt: 1,
         cardModeActive: 1,
         cardModeMessage: 1,
+        cardActiveUserId: 1,
       })
       .lean();
 
@@ -114,6 +115,14 @@ export async function GET(req: NextRequest) {
       meta: { source: "mobile_user_dashboard" },
     });
 
+    let cardActiveUser: string | null = null;
+    if ((admin as any)?.cardModeActive && (admin as any)?.cardActiveUserId) {
+      const cardUserDoc = await User.findById((admin as any).cardActiveUserId)
+        .select({ username: 1 })
+        .lean();
+      cardActiveUser = cardUserDoc?.username ?? null;
+    }
+
     return NextResponse.json({
       userId: String(user._id),
       username: user.username,
@@ -133,6 +142,7 @@ export async function GET(req: NextRequest) {
       adminSuspendReason: admin?.suspendReason ?? null,
       cardModeActive: Boolean((admin as any)?.cardModeActive),
       cardModeMessage: (admin as any)?.cardModeMessage ?? null,
+      cardActiveUser,
       pendingMinuteRequest: pendingRequest
         ? { minutes: pendingRequest.minutes, status: pendingRequest.status }
         : null,
