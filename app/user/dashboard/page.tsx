@@ -375,8 +375,21 @@ export default function UserDashboardPage() {
         )}
 
         {cardModeActive && (
-          <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
-            {cardModeMessage}
+          <div className="rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 via-white to-indigo-50 px-5 py-4 text-center shadow-sm">
+            <div className="mx-auto flex w-full max-w-md flex-col items-center gap-2">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-indigo-700">
+                <span className="text-sm font-bold">RF</span>
+              </div>
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-500">
+                Card Mode
+              </div>
+              <div className="text-base font-semibold text-indigo-900">
+                {cardModeMessage}
+              </div>
+              <div className="text-xs text-indigo-600">
+                Dashboard controls are locked while the card is active.
+              </div>
+            </div>
           </div>
         )}
 

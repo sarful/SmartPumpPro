@@ -152,6 +152,28 @@ export async function GET(req: NextRequest) {
 
     // RFID Card Mode: when uid is present, allow card-bound user to run and lock others out.
     if (adminLookupId && uid) {
+      // Resolve the card user first so unknown cards get a clear error even if motor is running.
+      const cardUser = await User.findOne({ adminId: adminLookupId, rfidUid: uid })
+        .select({ _id: 1, username: 1, adminId: 1, availableMinutes: 1, status: 1, suspendReason: 1, motorStatus: 1 })
+        .lean();
+
+      // Unknown card: return message and stop any active card session for safety.
+      if (!cardUser) {
+        if (admin?.cardModeActive) {
+          await finalizeCardModeSession({ adminId: adminLookupId, reason: 'unknown_uid' });
+        }
+        return NextResponse.json({
+          error: 'Unknown card',
+          cardModeActive: false,
+          cardModeMessage: 'Unknown card',
+          motorStatus: 'OFF',
+          remainingMinutes: 0,
+          availableMinutes: 0,
+          loadShedding: effectiveLoadShedding,
+          deviceReady: effectiveDeviceReady,
+        });
+      }
+
       // If motor is already running (any mode), block card mode unless it's the same active card session.
       const runningUser = await User.findOne({ adminId: adminLookupId, motorStatus: 'RUNNING' })
         .select({ _id: 1 })
@@ -183,24 +205,6 @@ export async function GET(req: NextRequest) {
           error: 'Motor already running',
           cardModeActive: true,
           cardModeMessage: admin.cardModeMessage || 'Now using card',
-          motorStatus: 'OFF',
-          remainingMinutes: 0,
-          availableMinutes: 0,
-          loadShedding: effectiveLoadShedding,
-          deviceReady: effectiveDeviceReady,
-        });
-      }
-
-      const cardUser = await User.findOne({ adminId: adminLookupId, rfidUid: uid })
-        .select({ _id: 1, username: 1, adminId: 1, availableMinutes: 1, status: 1, suspendReason: 1, motorStatus: 1 })
-        .lean();
-
-      // Unknown card: do not activate lock; keep motor OFF for safety and return message.
-      if (!cardUser) {
-        return NextResponse.json({
-          error: 'Unknown card',
-          cardModeActive: false,
-          cardModeMessage: 'Unknown card',
           motorStatus: 'OFF',
           remainingMinutes: 0,
           availableMinutes: 0,

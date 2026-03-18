@@ -95,7 +95,7 @@ export default function AdminDashboardPage() {
 // ---- SERVER CONFIG ----
 // Admin-based config with your ADMIN_ID
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
-const char* API_HOST = "https://pms-two-kappa.vercel.app";
+const char* API_HOST = "https://pms.mechatronicslab.net";
 
 unsigned long lastPoll = 0;
 
@@ -266,7 +266,7 @@ POLL_INTERVAL_MS = 5000
 HTTP_TIMEOUT_MS = 6  # seconds
 
 ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}"
-API_HOST = "https://pms-two-kappa.vercel.app"
+API_HOST = "https://pms.mechatronicslab.net"
 
 # ---------- SETUP ----------
 motor = machine.Pin(MOTOR_PIN, machine.Pin.OUT)
@@ -412,7 +412,7 @@ while True:
 #define HTTP_TIMEOUT_MS 8000
 
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
-const char* API_HOST = "https://pms-two-kappa.vercel.app";
+const char* API_HOST = "https://pms.mechatronicslab.net";
 
 unsigned long lastPoll = 0;
 
@@ -586,7 +586,7 @@ const char gprsPass[] = "";
 
 // ---------- Admin-based config ----------
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
-const char* SERVER   = "pms-two-kappa.vercel.app";
+const char* SERVER   = "pms.mechatronicslab.net";
 const int   PORT     = 80;
 
 TinyGsm modem(SerialAT);
@@ -1440,7 +1440,7 @@ void loop() {
               </div>
             </div>
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="min-w-[760px] w-full text-sm">
               <thead className="text-slate-400">
                 <tr>
                   <th className="px-2 py-2 text-left">Username</th>
@@ -1450,8 +1450,8 @@ void loop() {
                   <th className="px-2 py-2 text-left">Motor</th>
                   <th className="px-2 py-2 text-left">Running Time</th>
                   <th className="px-2 py-2 text-left">Status</th>
-                  <th className="px-2 py-2 text-left">Use</th>
-                  <th className="px-2 py-2 text-left">Actions</th>
+                  <th className="whitespace-nowrap px-2 py-2 text-center">Use</th>
+                  <th className="whitespace-nowrap px-2 py-2 text-left">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800 text-slate-100">
@@ -1469,15 +1469,15 @@ void loop() {
                     {u.status ?? "active"}
                     {u.suspendReason ? ` (${u.suspendReason})` : ""}
                   </td>
-                  <td className="px-2 py-2 text-xs text-slate-300">
+                  <td className="px-2 py-2 text-center text-xs text-slate-300">
                     {cardModeActive && cardActiveUserId === u._id
                       ? "Card"
                       : u.motorStatus === "RUNNING"
                         ? "Web"
                         : "-"}
                   </td>
-                    <td className="px-2 py-2">
-                      <div className="flex min-w-[260px] flex-wrap gap-2">
+                  <td className="px-2 py-2">
+                      <div className="flex min-w-0 flex-col gap-2 sm:min-w-[220px] sm:flex-row sm:flex-wrap">
                         <button
                           onClick={() => handleStartMotor(u._id, (u.motorRunningTime && u.motorRunningTime > 0) ? u.motorRunningTime : 5)}
                           disabled={
@@ -1488,34 +1488,34 @@ void loop() {
                             !internetOnline ||
                             u.status === "suspended"
                           }
-                          className="rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-800/50 disabled:opacity-60"
+                          className="w-full rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-800/50 disabled:opacity-60 sm:w-auto"
                         >
                           {startLoadingUserId === u._id ? "Starting..." : "Start Motor"}
                         </button>
                         <button
                           onClick={() => handleStopResetMotor(u._id)}
                           disabled={stopResetLoadingUserId === u._id}
-                          className="rounded-lg border border-cyan-500 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-800/50 disabled:opacity-60"
+                          className="w-full rounded-lg border border-cyan-500 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-800/50 disabled:opacity-60 sm:w-auto"
                         >
                           {stopResetLoadingUserId === u._id ? "Processing..." : "Stop/Reset"}
                         </button>
                         <button
                           onClick={() => handleDeleteUser(u._id)}
-                          className="rounded-lg border border-red-500 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
+                          className="w-full rounded-lg border border-red-500 px-2 py-1 text-xs text-red-700 hover:bg-red-50 sm:w-auto"
                         >
                           Delete
                         </button>
                         {u.status === "suspended" ? (
                           <button
                             onClick={() => handleUnsuspendUser(u._id)}
-                            className="rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50"
+                            className="w-full rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 sm:w-auto"
                           >
                             Unsuspend
                           </button>
                         ) : (
                           <button
                             onClick={() => handleSuspendUser(u._id)}
-                            className="rounded-lg border border-amber-500 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
+                            className="w-full rounded-lg border border-amber-500 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50 sm:w-auto"
                           >
                             Suspend
                           </button>

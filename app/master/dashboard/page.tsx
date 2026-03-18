@@ -13,8 +13,8 @@ type AdminRow = {
   devicePinHigh?: boolean;
   suspendReason?: string;
 };
-type UserRow = { _id: string; username: string; adminId: string; adminName?: string; rfidUid?: string; availableMinutes: number; motorStatus: string; motorRunningTime?: number; status?: string; suspendReason?: string };
-type UserWithAdmin = { _id: string; username: string; adminId: string; adminName?: string; rfidUid?: string; availableMinutes?: number; motorStatus?: string; motorRunningTime?: number; status?: string; suspendReason?: string };
+type UserRow = { _id: string; username: string; adminId: string; adminName?: string; rfidUid?: string; availableMinutes: number; motorStatus: string; motorRunningTime?: number; status?: string; suspendReason?: string; useSource?: string };
+type UserWithAdmin = { _id: string; username: string; adminId: string; adminName?: string; rfidUid?: string; availableMinutes?: number; motorStatus?: string; motorRunningTime?: number; status?: string; suspendReason?: string; useSource?: string };
 
 export default function MasterDashboardPage() {
   const { data: session, status } = useSession();
@@ -385,7 +385,7 @@ export default function MasterDashboardPage() {
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="text-sm text-slate-600">All Admins</div>
-          <div className="mt-3 grid gap-2 md:grid-cols-2">
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
             {allAdmins.map((ad) => (
               <div key={ad._id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900">
                 <div className="font-semibold">{ad.username}</div>
@@ -466,24 +466,25 @@ export default function MasterDashboardPage() {
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="text-sm text-slate-600">All Users</div>
-          <div className="mt-3 grid gap-2 md:grid-cols-2">
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {allUsers.map((u) => (
               <div key={u._id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900">
                 <div className="font-semibold">{u.username}</div>
                 <div className="text-slate-600 text-xs">Admin: {u.adminName ?? u.adminId}</div>
-                <div className="text-slate-600 text-xs">RFID: {u.rfidUid || "-"}</div>
+                <div className="text-slate-600 text-xs break-all">RFID: {u.rfidUid || "-"}</div>
                 <div className="text-slate-600 text-xs">Balance: {u.availableMinutes ?? 0} m</div>
                 <div className="text-slate-600 text-xs">Motor: {u.motorStatus ?? "OFF"}</div>
                 <div className="text-slate-600 text-xs">Running Time: {u.motorRunningTime ?? 0} m</div>
+                <div className="text-slate-600 text-xs">Use: {u.useSource ?? "-"}</div>
                 <div className="text-slate-600 text-xs">
                   Status: {u.status ?? "active"}
                   {u.suspendReason ? ` (${u.suspendReason})` : ""}
                 </div>
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   <input
                     type="number"
                     min={0}
-                    className="w-28 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 sm:w-28"
                     placeholder="minutes"
                     value={minuteDrafts[u._id] ?? String(u.availableMinutes ?? 0)}
                     onChange={(e) =>
@@ -496,7 +497,7 @@ export default function MasterDashboardPage() {
                       if (!Number.isFinite(value) || value <= 0) return setError("Recharge minutes must be > 0");
                       rechargeUserMinutes(u._id, value);
                     }}
-                    className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs text-emerald-700 hover:bg-emerald-100"
+                    className="w-full rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs text-emerald-700 hover:bg-emerald-100 sm:w-auto"
                   >
                     Recharge
                   </button>
@@ -506,40 +507,40 @@ export default function MasterDashboardPage() {
                       if (!Number.isFinite(value) || value < 0) return setError("Set minutes must be >= 0");
                       setUserAvailableMinutes(u._id, Math.floor(value));
                     }}
-                    className="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1 text-xs text-indigo-700 hover:bg-indigo-100"
+                    className="w-full rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1 text-xs text-indigo-700 hover:bg-indigo-100 sm:w-auto"
                   >
                     Set Balance
                   </button>
                   <button
                     onClick={() => startUserMotor(u._id, u.motorRunningTime && u.motorRunningTime > 0 ? u.motorRunningTime : 5)}
-                    className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-1 text-xs text-blue-700 hover:bg-blue-100"
+                    className="w-full rounded-lg border border-blue-300 bg-blue-50 px-3 py-1 text-xs text-blue-700 hover:bg-blue-100 sm:w-auto"
                   >
                     Start Motor
                   </button>
                   <button
                     onClick={() => stopResetUserMotor(u._id)}
-                    className="rounded-lg border border-slate-300 bg-slate-100 px-3 py-1 text-xs text-slate-800 hover:bg-slate-200"
+                    className="w-full rounded-lg border border-slate-300 bg-slate-100 px-3 py-1 text-xs text-slate-800 hover:bg-slate-200 sm:w-auto"
                   >
                     Stop/Reset
                   </button>
                   {u.status === "suspended" ? (
                     <button
                       onClick={() => unsuspendUser(u._id)}
-                      className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs text-emerald-700 hover:bg-emerald-100"
+                      className="w-full rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs text-emerald-700 hover:bg-emerald-100 sm:w-auto"
                     >
                       Unsuspend
                     </button>
                   ) : (
                     <button
                       onClick={() => suspendUser(u._id)}
-                      className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1 text-xs text-amber-700 hover:bg-amber-100"
+                      className="w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-1 text-xs text-amber-700 hover:bg-amber-100 sm:w-auto"
                     >
                       Suspend
                     </button>
                   )}
                   <button
                     onClick={() => deleteUser(u._id)}
-                    className="rounded-lg border border-red-300 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100"
+                    className="w-full rounded-lg border border-red-300 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100 sm:w-auto"
                   >
                     Delete
                   </button>

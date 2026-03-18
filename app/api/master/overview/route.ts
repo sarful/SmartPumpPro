@@ -16,13 +16,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   await connectDB();
-  const [adminCount, userCount, running, waiting, adminList, userList] = await Promise.all([
+  const [adminCount, userCount, runningQueueCount, waiting, adminList, userList] = await Promise.all([
     Admin.countDocuments({}),
     User.countDocuments({}),
     Queue.countDocuments({ status: 'RUNNING' }),
     Queue.countDocuments({ status: 'WAITING' }),
     Admin.find({})
-      .select({ username: 1, status: 1, loadShedding: 1, suspendReason: 1, deviceReady: 1, devicePinHigh: 1, deviceLastSeenAt: 1 })
+      .select({
+        username: 1,
+        status: 1,
+        loadShedding: 1,
+        suspendReason: 1,
+        deviceReady: 1,
+        devicePinHigh: 1,
+        deviceLastSeenAt: 1,
+        cardModeActive: 1,
+        cardActiveUserId: 1,
+      })
       .lean(),
     User.find({})
       .select({
@@ -46,11 +56,32 @@ export async function GET(req: NextRequest) {
     deviceReady: isDeviceReadyEffective(a),
   }));
 
-  const adminNameMap = Object.fromEntries(adminsWithDeviceState.map((a: any) => [String(a._id), a.username]));
-  const usersWithAdminName = userList.map((u: any) => ({
-    ...u,
-    adminName: adminNameMap[String(u.adminId)] ?? u.adminId,
-  }));
+  const cardRunningCount = adminsWithDeviceState.filter((a: any) => Boolean(a.cardModeActive)).length;
+  const running = runningQueueCount + cardRunningCount;
+
+  const adminMetaMap = Object.fromEntries(
+    adminsWithDeviceState.map((a: any) => [
+      String(a._id),
+      {
+        name: a.username,
+        cardModeActive: Boolean(a.cardModeActive),
+        cardActiveUserId: a.cardActiveUserId ? String(a.cardActiveUserId) : null,
+      },
+    ]),
+  );
+  const usersWithAdminName = userList.map((u: any) => {
+    const meta = adminMetaMap[String(u.adminId)];
+    const useSource = meta?.cardModeActive && meta.cardActiveUserId === String(u._id)
+      ? 'Card'
+      : u.motorStatus === 'RUNNING'
+        ? 'Web'
+        : '-';
+    return {
+      ...u,
+      adminName: meta?.name ?? u.adminId,
+      useSource,
+    };
+  });
 
   return NextResponse.json({
     adminCount,
