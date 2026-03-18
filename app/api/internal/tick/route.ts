@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { tickRunningMotors } from '@/lib/timer-engine';
+import { tickCardModeBilling, tickRunningMotors } from '@/lib/timer-engine';
 
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -10,6 +10,7 @@ export async function GET(req: NextRequest) {
 
   try {
     await tickRunningMotors();
+    await tickCardModeBilling();
     return NextResponse.json({ ok: true });
   } catch (error: any) {
     console.error('Tick error:', error);

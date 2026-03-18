@@ -4,6 +4,7 @@ import User, { UserDocument } from '@/models/User';
 import Queue from '@/models/Queue';
 import { startNextUser } from '@/lib/queue-engine';
 import Admin from '@/models/Admin';
+import { billCardModeFloorMinutes } from '@/lib/card-mode';
 
 const toObjectId = (id: string | Types.ObjectId): Types.ObjectId =>
   typeof id === 'string' ? new Types.ObjectId(id) : id;
@@ -23,9 +24,10 @@ export async function tickRunningMotors(): Promise<void> {
   for (const user of runningUsers) {
     if (!user.motorStartTime) continue;
 
-    // If the admin is under load shedding, skip decrementing (should be HOLDed, but guard anyway)
-    const admin = await Admin.findById(user.adminId).select({ loadShedding: 1 }).lean();
+    // If the admin is under load shedding or card mode, skip decrementing (card mode is billed separately)
+    const admin = await Admin.findById(user.adminId).select({ loadShedding: 1, cardModeActive: 1, cardActiveUserId: 1 }).lean();
     if (admin?.loadShedding) continue;
+    if (admin?.cardModeActive) continue;
 
     const elapsedMinutesTotal = Math.floor((now - new Date(user.motorStartTime).getTime()) / 60000);
     if (elapsedMinutesTotal <= 0) continue;
@@ -64,6 +66,14 @@ export async function tickRunningMotors(): Promise<void> {
   }
 }
 
+export async function tickCardModeBilling(): Promise<void> {
+  await connectDB();
+  const admins = await Admin.find({ cardModeActive: true }).select({ _id: 1 }).lean();
+  for (const admin of admins) {
+    await billCardModeFloorMinutes({ adminId: admin._id });
+  }
+}
+
 export async function stopMotorForUser(
   userId: string | Types.ObjectId,
 ): Promise<UserDocument | null> {
@@ -71,6 +81,13 @@ export async function stopMotorForUser(
   const userObjectId = toObjectId(userId);
   const user = await User.findById(userObjectId);
   if (!user || (user.motorStatus !== 'RUNNING' && user.motorStatus !== 'HOLD')) return null;
+
+  const admin = await Admin.findById(user.adminId).select({ cardModeActive: 1, cardActiveUserId: 1 }).lean();
+  if (admin?.cardModeActive && String(admin.cardActiveUserId ?? '') === String(user._id)) {
+    const { finalizeCardModeSession } = await import('@/lib/card-mode');
+    await finalizeCardModeSession({ adminId: user.adminId, reason: 'admin_override' });
+    return await User.findById(userObjectId);
+  }
 
   const usedMinutes = calculateUsedMinutes(user.motorStartTime, user.lastSetMinutes);
   const remaining =
