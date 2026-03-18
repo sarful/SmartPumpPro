@@ -4,7 +4,7 @@ import User, { UserDocument } from '@/models/User';
 import Queue from '@/models/Queue';
 import { startNextUser } from '@/lib/queue-engine';
 import Admin from '@/models/Admin';
-import { billCardModeFloorMinutes } from '@/lib/card-mode';
+import { billCardModeFloorMinutes, finalizeCardModeSession, getAdminCardMode } from '@/lib/card-mode';
 
 const toObjectId = (id: string | Types.ObjectId): Types.ObjectId =>
   typeof id === 'string' ? new Types.ObjectId(id) : id;
@@ -71,6 +71,12 @@ export async function tickCardModeBilling(): Promise<void> {
   const admins = await Admin.find({ cardModeActive: true }).select({ _id: 1 }).lean();
   for (const admin of admins) {
     await billCardModeFloorMinutes({ adminId: admin._id });
+    const meta = await getAdminCardMode(admin._id);
+    if (!meta?.cardModeActive || !meta.cardActiveUserId) continue;
+    const cardUser = await User.findById(meta.cardActiveUserId).select({ availableMinutes: 1 }).lean();
+    if ((cardUser?.availableMinutes ?? 0) <= 5) {
+      await finalizeCardModeSession({ adminId: admin._id, reason: 'insufficient' });
+    }
   }
 }
 

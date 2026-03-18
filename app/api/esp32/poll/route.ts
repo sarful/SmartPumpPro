@@ -241,13 +241,19 @@ export async function GET(req: NextRequest) {
 
       // Balance rule: must have > 5 minutes to run in card mode.
       if ((cardUser.availableMinutes ?? 0) <= 5) {
+        if (admin?.cardModeActive && String(admin.cardActiveUserId ?? '') === String(cardUser._id)) {
+          await finalizeCardModeSession({ adminId: adminLookupId, reason: 'insufficient' });
+        }
+        const updatedUser = await User.findById(cardUser._id)
+          .select({ availableMinutes: 1 })
+          .lean();
         return NextResponse.json({
           error: 'Insufficient balance',
           cardModeActive: false,
           cardModeMessage: 'Insufficient balance',
           motorStatus: 'OFF',
           remainingMinutes: 0,
-          availableMinutes: cardUser.availableMinutes ?? 0,
+          availableMinutes: updatedUser?.availableMinutes ?? cardUser.availableMinutes ?? 0,
           loadShedding: effectiveLoadShedding,
           deviceReady: effectiveDeviceReady,
         });
