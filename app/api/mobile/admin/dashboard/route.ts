@@ -4,13 +4,13 @@ import { getMobileAccessPayload } from "@/lib/mobile-request-auth";
 import Admin from "@/models/Admin";
 import User from "@/models/User";
 import MinuteRequest from "@/models/MinuteRequest";
-import Queue from "@/models/Queue";
-import { isDeviceOnline, isDeviceReadyEffective } from "@/lib/device-readiness";
+import { getActiveQueueSnapshot, getAdminRuntimeState, getUserUseSource } from "@/lib/dashboard-runtime";
 import { logReadinessTransitions } from "@/lib/usage-logger";
 
 type UserLean = {
   _id: unknown;
   username?: string;
+  rfidUid?: string | null;
   availableMinutes?: number;
   motorStatus?: string;
   motorRunningTime?: number;
@@ -23,14 +23,6 @@ type MinuteRequestLean = {
   userId?: unknown;
   minutes?: number;
   createdAt?: Date;
-};
-
-type QueueLean = {
-  _id: unknown;
-  position?: number;
-  status?: string;
-  requestedMinutes?: number;
-  userId?: unknown;
 };
 
 function getPopulatedUsername(value: unknown): string | null {
@@ -47,7 +39,7 @@ function getPopulatedId(value: unknown): string | null {
 
 export async function GET(req: NextRequest) {
   try {
-    const payload = getMobileAccessPayload(req);
+    const payload = await getMobileAccessPayload(req);
     if (!payload) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (payload.role !== "admin") {
       return NextResponse.json({ error: "Only admin role is allowed" }, { status: 403 });
@@ -72,40 +64,37 @@ export async function GET(req: NextRequest) {
       .lean();
     if (!admin) return NextResponse.json({ error: "Admin not found" }, { status: 404 });
 
-    const users = await User.find({ adminId })
-      .select({
-        username: 1,
-        rfidUid: 1,
-        availableMinutes: 1,
-        motorStatus: 1,
-        motorRunningTime: 1,
-        status: 1,
-        suspendReason: 1,
-      })
-      .sort({ createdAt: -1 })
-      .lean();
+    const [users, requests, queue] = await Promise.all([
+      User.find({ adminId })
+        .select({
+          username: 1,
+          rfidUid: 1,
+          availableMinutes: 1,
+          motorStatus: 1,
+          motorRunningTime: 1,
+          status: 1,
+          suspendReason: 1,
+        })
+        .sort({ createdAt: -1 })
+        .lean(),
+      MinuteRequest.find({ adminId, status: "pending" })
+        .sort({ createdAt: -1 })
+        .populate("userId", "username")
+        .lean(),
+      getActiveQueueSnapshot(String(adminId)),
+    ]);
 
-    const requests = await MinuteRequest.find({ adminId, status: "pending" })
-      .sort({ createdAt: -1 })
-      .populate("userId", "username")
-      .lean();
-
-    const queue = await Queue.find({ adminId, status: { $in: ["RUNNING", "WAITING"] } })
-      .sort({ position: 1 })
-      .populate("userId", "username")
-      .select({ position: 1, status: 1, requestedMinutes: 1, userId: 1 })
-      .lean();
-
-    const deviceOnline = isDeviceOnline(admin.deviceLastSeenAt);
-    const effectiveDeviceReady = isDeviceReadyEffective(admin);
-    const effectiveLoadShedding = Boolean(admin.loadShedding) && deviceOnline;
+    const runtime = getAdminRuntimeState(admin);
+    const usersById = new Map(
+      (users as UserLean[]).map((user) => [String(user._id), user]),
+    );
 
     await logReadinessTransitions({
       adminId,
       current: {
-        deviceReady: effectiveDeviceReady,
-        loadShedding: effectiveLoadShedding,
-        internetOnline: effectiveDeviceReady,
+        deviceReady: runtime.effectiveDeviceReady,
+        loadShedding: runtime.effectiveLoadShedding,
+        internetOnline: runtime.effectiveDeviceReady,
       },
       meta: { source: "mobile_admin_dashboard" },
     });
@@ -116,28 +105,27 @@ export async function GET(req: NextRequest) {
         username: admin.username,
         status: admin.status,
         suspendReason: admin.suspendReason ?? null,
-        loadShedding: effectiveLoadShedding,
-        deviceReady: effectiveDeviceReady,
-        deviceOnline,
+        loadShedding: runtime.effectiveLoadShedding,
+        deviceReady: runtime.effectiveDeviceReady,
+        deviceOnline: runtime.deviceOnline,
         devicePinHigh: Boolean(admin.devicePinHigh),
         deviceLastSeenAt: admin.deviceLastSeenAt ?? null,
       },
       users: (users as UserLean[]).map((u) => ({
         id: String(u._id),
         username: u.username,
-        rfidUid: (u as any).rfidUid ?? null,
+        rfidUid: u.rfidUid ?? null,
         availableMinutes: u.availableMinutes ?? 0,
         motorStatus: u.motorStatus ?? "OFF",
         motorRunningTime: u.motorRunningTime ?? 0,
         status: u.status ?? "active",
         suspendReason: u.suspendReason ?? null,
-        useSource:
-          Boolean((admin as any)?.cardModeActive) &&
-          String((admin as any)?.cardActiveUserId ?? "") === String(u._id)
-            ? "Card"
-            : u.motorStatus === "RUNNING"
-              ? "Web"
-              : null,
+        useSource: getUserUseSource({
+          userId: u._id,
+          motorStatus: u.motorStatus,
+          cardModeActive: admin.cardModeActive,
+          cardActiveUserId: admin.cardActiveUserId,
+        }),
       })),
       pendingRequests: (requests as MinuteRequestLean[]).map((r) => ({
         id: String(r._id),
@@ -146,12 +134,12 @@ export async function GET(req: NextRequest) {
         minutes: r.minutes,
         createdAt: r.createdAt,
       })),
-      queue: (queue as QueueLean[]).map((q) => ({
-        id: String(q._id),
+      queue: queue.map((q) => ({
+        id: q.id,
         position: q.position,
         status: q.status,
         requestedMinutes: q.requestedMinutes,
-        username: getPopulatedUsername(q.userId),
+        username: usersById.get(q.userId)?.username ?? null,
       })),
     });
   } catch (error) {

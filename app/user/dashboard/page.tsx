@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { DashboardMessage } from "@/components/DashboardMessage";
 import useRealtime from "@/hooks/useRealtime";
 
 type MotorStatus = "OFF" | "RUNNING" | "HOLD";
@@ -417,30 +418,42 @@ export default function UserDashboardPage() {
         )}
 
         {loadShedding && (
-          <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
-            Load shedding active now. Motor is on HOLD until power resumes.
-          </div>
+          <DashboardMessage
+            variant="warning"
+            title="System on hold"
+            message="Load shedding is active now. Motor actions stay on HOLD until power resumes."
+          />
         )}
 
         {!suspendedReason &&
           !loadShedding &&
           effectiveDeviceReady === false &&
           data?.holdReason === "device_not_ready" && (
-          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Your device is not ready.
-          </div>
+          <DashboardMessage
+            variant="warning"
+            title="Device not ready"
+            message="Your device is reporting not ready, so motor actions are temporarily blocked."
+          />
           )}
 
         {!internetOnline && (
-          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Internet is offline. Motor remains on HOLD until connection is restored.
-          </div>
+          <DashboardMessage
+            variant="warning"
+            title="Internet offline"
+            message="Motor remains on HOLD until the connection is restored."
+          />
         )}
 
         {requestError && (
-          <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
-            {requestError}
-          </div>
+          <DashboardMessage variant="error" title="Action failed" message={requestError} />
+        )}
+
+        {error && (
+          <DashboardMessage
+            variant="warning"
+            title="Realtime degraded"
+            message="Live updates are delayed right now. You can still refresh or continue using the dashboard."
+          />
         )}
 
         <div className="mx-auto w-full max-w-5xl rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
@@ -682,6 +695,12 @@ export default function UserDashboardPage() {
                   className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-cyan-400 hover:text-cyan-700"
                 >
                   Download History
+                </a>
+                <a
+                  href="/user/change-password"
+                  className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-cyan-400 hover:text-cyan-700"
+                >
+                  Change Password
                 </a>
                 <button
                   onClick={() => signOut({ callbackUrl: "/user/login" })}

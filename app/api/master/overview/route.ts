@@ -7,6 +7,31 @@ import Queue from '@/models/Queue';
 import { isDeviceOnline, isDeviceReadyEffective } from '@/lib/device-readiness';
 import { enforceRateLimit } from '@/lib/api-guard';
 
+type AdminLean = {
+  _id: unknown;
+  username?: string;
+  status?: string;
+  loadShedding?: boolean;
+  suspendReason?: string | null;
+  deviceReady?: boolean;
+  devicePinHigh?: boolean;
+  deviceLastSeenAt?: Date | string | null;
+  cardModeActive?: boolean;
+  cardActiveUserId?: unknown;
+};
+
+type UserLean = {
+  _id: unknown;
+  adminId?: unknown;
+  username?: string;
+  rfidUid?: string | null;
+  status?: string;
+  suspendReason?: string | null;
+  availableMinutes?: number;
+  motorStatus?: string;
+  motorRunningTime?: number;
+};
+
 export async function GET(req: NextRequest) {
   const limited = enforceRateLimit(req, 'master-overview', 30, 60_000);
   if (limited) return limited;
@@ -49,18 +74,18 @@ export async function GET(req: NextRequest) {
   ]);
 
    // map adminId -> name for user records
-  const adminsWithDeviceState = adminList.map((a: any) => ({
+  const adminsWithDeviceState = (adminList as AdminLean[]).map((a) => ({
     ...a,
     loadShedding: Boolean(a.loadShedding) && isDeviceOnline(a.deviceLastSeenAt),
     deviceOnline: isDeviceOnline(a.deviceLastSeenAt),
     deviceReady: isDeviceReadyEffective(a),
   }));
 
-  const cardRunningCount = adminsWithDeviceState.filter((a: any) => Boolean(a.cardModeActive)).length;
+  const cardRunningCount = adminsWithDeviceState.filter((a) => Boolean(a.cardModeActive)).length;
   const running = runningQueueCount + cardRunningCount;
 
   const adminMetaMap = Object.fromEntries(
-    adminsWithDeviceState.map((a: any) => [
+    adminsWithDeviceState.map((a) => [
       String(a._id),
       {
         name: a.username,
@@ -69,7 +94,7 @@ export async function GET(req: NextRequest) {
       },
     ]),
   );
-  const usersWithAdminName = userList.map((u: any) => {
+  const usersWithAdminName = (userList as UserLean[]).map((u) => {
     const meta = adminMetaMap[String(u.adminId)];
     const useSource = meta?.cardModeActive && meta.cardActiveUserId === String(u._id)
       ? 'Card'

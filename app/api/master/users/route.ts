@@ -6,6 +6,24 @@ import Admin from '@/models/Admin';
 import { Types } from 'mongoose';
 import { hash } from 'bcryptjs';
 import { enforceRateLimit } from '@/lib/api-guard';
+import { requireWebMutationSession } from '@/lib/web-mutation-auth';
+
+type AdminLean = {
+  _id: unknown;
+  username?: string;
+};
+
+type UserLean = {
+  _id: unknown;
+  adminId?: unknown;
+  username?: string;
+  rfidUid?: string | null;
+  availableMinutes?: number;
+  motorStatus?: string;
+  motorRunningTime?: number;
+  status?: string;
+  suspendReason?: string | null;
+};
 
 export async function GET(req: NextRequest) {
   const limited = enforceRateLimit(req, 'master-users', 60, 60_000);
@@ -32,8 +50,8 @@ export async function GET(req: NextRequest) {
     User.countDocuments({}),
   ]);
 
-  const adminMap = Object.fromEntries(admins.map((a: any) => [String(a._id), a.username]));
-  const usersWithAdmin = users.map((u: any) => ({
+  const adminMap = Object.fromEntries((admins as AdminLean[]).map((a) => [String(a._id), a.username]));
+  const usersWithAdmin = (users as UserLean[]).map((u) => ({
     ...u,
     adminName: adminMap[String(u.adminId)] ?? u.adminId,
   }));
@@ -48,10 +66,8 @@ export async function POST(req: NextRequest) {
   const limited = enforceRateLimit(req, 'master-users-create', 30, 60_000);
   if (limited) return limited;
 
-  const session = await auth();
-  if (!session || session.user.role !== 'master') {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const authResult = await requireWebMutationSession(['master']);
+  if (authResult.response) return authResult.response;
 
   let body: { username?: string; password?: string; adminId?: string };
   try {

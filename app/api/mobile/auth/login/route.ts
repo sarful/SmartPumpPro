@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { compare } from "bcryptjs";
 import { connectDB } from "@/lib/mongodb";
 import MasterAdmin from "@/models/MasterAdmin";
 import Admin from "@/models/Admin";
@@ -11,6 +10,7 @@ import {
   getRefreshExpiryDate,
   hashRefreshToken,
 } from "@/lib/mobile-auth";
+import { verifyStoredPassword } from "@/lib/passwords";
 import { rateLimit } from "@/lib/rate-limit";
 import {
   clearFailedAuth,
@@ -19,24 +19,13 @@ import {
   makeThrottleKey,
   registerFailedAuth,
 } from "@/lib/auth-security";
+import { reportIncident } from "@/lib/observability";
 
 type Body = {
   username?: string;
   password?: string;
   deviceId?: string;
 };
-
-async function verifyPassword(stored: string | undefined | null, provided: string) {
-  if (!stored) return false;
-  try {
-    const ok = await compare(provided, stored);
-    if (ok) return true;
-  } catch {
-    // no-op
-  }
-  if (!stored.startsWith("$2")) return stored === provided;
-  return false;
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -98,7 +87,7 @@ export async function POST(req: NextRequest) {
       }
 
       const refreshToken = createRefreshToken();
-      await MobileSession.create({
+      const session = await MobileSession.create({
         ...sessionData,
         deviceId,
         userAgent,
@@ -107,13 +96,16 @@ export async function POST(req: NextRequest) {
         refreshTokenHash: hashRefreshToken(refreshToken),
         expiresAt: getRefreshExpiryDate(),
       });
-      return refreshToken;
+      return {
+        refreshToken,
+        sessionId: session._id.toString(),
+      };
     };
 
     const master = await MasterAdmin.findOne({ username }).lean();
-    if (master && (await verifyPassword(master.password, password))) {
+    if (master && (await verifyStoredPassword(master.password, password))) {
       await clearFailedAuth({ key: throttleKey });
-      const refreshToken = await createSession({
+      const { refreshToken, sessionId } = await createSession({
         userId: master._id.toString(),
         role: "master",
         username: master.username,
@@ -122,6 +114,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         accessToken: createAccessToken({
           sub: master._id.toString(),
+          sid: sessionId,
           role: "master",
           username: master.username,
         }),
@@ -131,9 +124,9 @@ export async function POST(req: NextRequest) {
     }
 
     const admin = await Admin.findOne({ username, status: "active" }).lean();
-    if (admin && (await verifyPassword(admin.password, password))) {
+    if (admin && (await verifyStoredPassword(admin.password, password))) {
       await clearFailedAuth({ key: throttleKey });
-      const refreshToken = await createSession({
+      const { refreshToken, sessionId } = await createSession({
         userId: admin._id.toString(),
         role: "admin",
         username: admin.username,
@@ -143,6 +136,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         accessToken: createAccessToken({
           sub: admin._id.toString(),
+          sid: sessionId,
           role: "admin",
           username: admin.username,
           adminId: admin._id.toString(),
@@ -158,10 +152,10 @@ export async function POST(req: NextRequest) {
     }
 
     const user = await User.findOne({ username, status: { $ne: "suspended" } }).lean();
-    if (user && (await verifyPassword(user.password, password))) {
+    if (user && (await verifyStoredPassword(user.password, password))) {
       await clearFailedAuth({ key: throttleKey });
       const adminId = user.adminId?.toString();
-      const refreshToken = await createSession({
+      const { refreshToken, sessionId } = await createSession({
         userId: user._id.toString(),
         role: "user",
         username: user.username,
@@ -171,6 +165,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         accessToken: createAccessToken({
           sub: user._id.toString(),
+          sid: sessionId,
           role: "user",
           username: user.username,
           adminId,
@@ -193,7 +188,14 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   } catch (error) {
-    console.error("mobile login error", error);
-    return NextResponse.json({ error: "Failed to login" }, { status: 500 });
+    const requestId = await reportIncident({
+      error,
+      source: "mobile_auth_login",
+      route: "/api/mobile/auth/login",
+      platform: "mobile",
+      ip: req.headers.get("x-forwarded-for"),
+      userAgent: req.headers.get("user-agent"),
+    });
+    return NextResponse.json({ error: "Failed to login", requestId }, { status: 500 });
   }
 }

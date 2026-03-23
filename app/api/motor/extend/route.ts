@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import User from '@/models/User';
 import Queue from '@/models/Queue';
-import { auth } from '@/lib/auth';
 import Admin from '@/models/Admin';
 import { enforceRateLimit } from '@/lib/api-guard';
+import { requireWebMutationSession } from '@/lib/web-mutation-auth';
 
 type Body = {
   userId?: string;
@@ -16,10 +16,9 @@ export async function POST(req: NextRequest) {
     const limited = enforceRateLimit(req, 'motor-extend', 30, 60_000);
     if (limited) return limited;
 
-    const session = await auth();
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const authResult = await requireWebMutationSession(['master', 'admin', 'user']);
+    if (authResult.response) return authResult.response;
+    const { session } = authResult;
 
     let body: Body;
     try {
@@ -82,7 +81,7 @@ export async function POST(req: NextRequest) {
       availableMinutes: user.availableMinutes,
       motorRunningTime: user.motorRunningTime,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Motor extend error:', error);
     return NextResponse.json({ error: 'Failed to extend motor time' }, { status: 500 });
   }

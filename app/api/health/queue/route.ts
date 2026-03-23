@@ -8,7 +8,7 @@ export async function GET() {
     const running = await Queue.countDocuments({ status: 'RUNNING' });
     const waiting = await Queue.countDocuments({ status: 'WAITING' });
     return NextResponse.json({ ok: true, running, waiting });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Queue health error:', error);
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ ok: false, error: message }, { status: 500 });

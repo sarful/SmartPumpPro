@@ -23,6 +23,7 @@
 // ===== YOUR CONFIG =====
 const char* ADMIN_ID = "PUT_YOUR_ADMIN_ID_HERE";       // e.g. 69a40837b2e2acccfbe8c476
 const char* API_HOST = "http://192.168.2.101:3000";    // Use server LAN IP for ESP32, not localhost
+const char* DEVICE_KEY = "PUT_YOUR_ESP32_DEVICE_SECRET_HERE";
 
 // ===== GLOBAL =====
 unsigned long lastPoll = 0;
@@ -65,6 +66,8 @@ void pollServer() {
     Serial.println("[HTTP] begin failed");
     return;
   }
+
+  http.addHeader("x-device-key", DEVICE_KEY);
 
   int code = http.GET();
   if (code != 200) {

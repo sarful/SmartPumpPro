@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import User from '@/models/User';
 import { calculateUsedMinutes, stopMotorForUser } from '@/lib/timer-engine';
-import { auth } from '@/lib/auth';
 import Queue from '@/models/Queue';
 import { enforceRateLimit } from '@/lib/api-guard';
+import { requireWebMutationSession } from '@/lib/web-mutation-auth';
 
 type StopMotorRequest = {
   userId?: string;
@@ -15,10 +15,9 @@ export async function POST(req: NextRequest) {
     const limited = enforceRateLimit(req, 'motor-stop', 40, 60_000);
     if (limited) return limited;
 
-    const session = await auth();
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const authResult = await requireWebMutationSession(['master', 'admin', 'user']);
+    if (authResult.response) return authResult.response;
+    const { session } = authResult;
 
     let body: StopMotorRequest;
     try {

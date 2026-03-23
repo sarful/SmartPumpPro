@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
 import { connectDB } from '@/lib/mongodb';
 import User from '@/models/User';
 import { Types } from 'mongoose';
 import { normalizeRfidUid } from '@/lib/card-mode';
 import { enforceRateLimit } from '@/lib/api-guard';
 import { logEvent } from '@/lib/usage-logger';
+import { requireWebMutationSession } from '@/lib/web-mutation-auth';
 
 type Body = {
   userId?: string;
@@ -16,10 +16,8 @@ export async function POST(req: NextRequest) {
   const limited = enforceRateLimit(req, 'master-user-rfid', 40, 60_000);
   if (limited) return limited;
 
-  const session = await auth();
-  if (!session || session.user.role !== 'master') {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const authResult = await requireWebMutationSession(['master']);
+  if (authResult.response) return authResult.response;
 
   let body: Body;
   try {

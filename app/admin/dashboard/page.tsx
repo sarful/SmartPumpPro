@@ -1,7 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
+import { DashboardMessage } from "@/components/DashboardMessage";
+import { getErrorMessage } from "@/lib/error-message";
+import { AdminActionCards } from "@/components/admin/AdminActionCards";
+import { AdminFirmwareCodeSection } from "@/components/admin/AdminFirmwareCodeSection";
+import { AdminMinuteRequestsSection } from "@/components/admin/AdminMinuteRequestsSection";
+import { AdminQueueSection } from "@/components/admin/AdminQueueSection";
+import { AdminUsersTable } from "@/components/admin/AdminUsersTable";
 
 type UserRow = {
   _id: string;
@@ -51,6 +58,7 @@ export default function AdminDashboardPage() {
   const [rfidUid, setRfidUid] = useState<string>("");
   const [rfidLoading, setRfidLoading] = useState(false);
   const [rfidMessage, setRfidMessage] = useState<string | null>(null);
+  const [rfidError, setRfidError] = useState<string | null>(null);
   const [requests, setRequests] = useState<
     { _id: string; userId: string | { _id: string; username: string }; minutes: number; createdAt: string }[]
   >([]);
@@ -96,6 +104,7 @@ export default function AdminDashboardPage() {
 // Admin-based config with your ADMIN_ID
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
 const char* API_HOST = "https://pms.mechatronicslab.net";
+const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
 
 unsigned long lastPoll = 0;
 
@@ -160,6 +169,8 @@ void pollServer() {
     return;
   }
 
+  http.addHeader("x-device-key", DEVICE_KEY);
+
   int code = http.GET();
   if (code == 301 || code == 302 || code == 307 || code == 308) {
     String location = http.header("Location");
@@ -169,6 +180,7 @@ void pollServer() {
       Serial.println("[HTTP] redirect begin failed");
       return;
     }
+    http.addHeader("x-device-key", DEVICE_KEY);
     code = http.GET();
   }
   if (code != HTTP_CODE_OK) {
@@ -267,6 +279,7 @@ HTTP_TIMEOUT_MS = 6  # seconds
 
 ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}"
 API_HOST = "https://pms.mechatronicslab.net"
+DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET"
 
 # ---------- SETUP ----------
 motor = machine.Pin(MOTOR_PIN, machine.Pin.OUT)
@@ -341,7 +354,7 @@ def poll_server(wlan):
     )
 
     try:
-        response = urequests.get(url, timeout=HTTP_TIMEOUT_MS)
+        response = urequests.get(url, headers={"x-device-key": DEVICE_KEY}, timeout=HTTP_TIMEOUT_MS)
 
         if response.status_code != 200:
             print("[HTTP] code=", response.status_code)
@@ -413,6 +426,7 @@ while True:
 
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
 const char* API_HOST = "https://pms.mechatronicslab.net";
+const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
 
 unsigned long lastPoll = 0;
 
@@ -478,6 +492,8 @@ void pollServer() {
     return;
   }
 
+  http.addHeader("x-device-key", DEVICE_KEY);
+
   int code = http.GET();
   if (code == 301 || code == 302 || code == 307 || code == 308) {
     String location = http.header("Location");
@@ -487,6 +503,7 @@ void pollServer() {
       Serial.println("[HTTP] redirect begin failed");
       return;
     }
+    http.addHeader("x-device-key", DEVICE_KEY);
     code = http.GET();
   }
 
@@ -588,6 +605,7 @@ const char gprsPass[] = "";
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
 const char* SERVER   = "pms.mechatronicslab.net";
 const int   PORT     = 80;
+const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
 
 TinyGsm modem(SerialAT);
 TinyGsmClient client(modem);
@@ -685,6 +703,7 @@ void pollServer() {
 
   client.print(String("GET ") + path + " HTTP/1.1\\r\\n");
   client.print(String("Host: ") + SERVER + "\\r\\n");
+  client.print(String("x-device-key: ") + DEVICE_KEY + "\\r\\n");
   client.print("Connection: close\\r\\n\\r\\n");
 
   String body;
@@ -793,6 +812,7 @@ const char gprsPass[] = "";
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
 const char* SERVER   = "pms-two-kappa.vercel.app";
 const int   PORT     = 80;
+const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
 
 TinyGsm modem(SerialAT);
 TinyGsmClient client(modem);
@@ -881,6 +901,7 @@ void pollServer() {
 
   client.print(String("GET ") + path + " HTTP/1.1\\r\\n");
   client.print(String("Host: ") + SERVER + "\\r\\n");
+  client.print(String("x-device-key: ") + DEVICE_KEY + "\\r\\n");
   client.print("Connection: close\\r\\n\\r\\n");
 
   String body;
@@ -957,10 +978,13 @@ void loop() {
     }
   };
 
-  const loadData = async () => {
+  const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!isAdmin) return;
-    setLoading(true);
-    setError(null);
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const [usersRes, activityRes, statusRes, reqRes] = await Promise.all([
         fetch("/api/admin/users"),
@@ -983,18 +1007,30 @@ void loop() {
         setCardActiveUserId(statusJson.admin.cardActiveUserId ?? null);
       }
       if (reqRes.ok) setRequests(reqJson.requests ?? []);
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Failed to load data");
+    } catch (err) {
+      if (!silent) {
+        setError(getErrorMessage(err, "Failed to load data"));
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
-  };
+  }, [isAdmin]);
 
   useEffect(() => {
     if (status === "authenticated" && isAdmin) {
       loadData();
     }
-  }, [status, isAdmin]);
+  }, [status, isAdmin, loadData]);
+
+  useEffect(() => {
+    if (status !== "authenticated" || !isAdmin) return;
+    const intervalId = setInterval(() => {
+      loadData({ silent: true });
+    }, 5000);
+    return () => clearInterval(intervalId);
+  }, [status, isAdmin, loadData]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1021,8 +1057,8 @@ void loop() {
       if (!res.ok) throw new Error(json.error || "Create failed");
       setNewUser({ username: "", password: "" });
       await loadData();
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Create failed");
+    } catch (err) {
+      setError(getErrorMessage(err, "Create failed"));
     } finally {
       setCreateLoading(false);
     }
@@ -1041,8 +1077,8 @@ void loop() {
       if (!res.ok) throw new Error(json.error || "Recharge failed");
       setRechargeMinutes(0);
       await loadData();
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Recharge failed");
+    } catch (err) {
+      setError(getErrorMessage(err, "Recharge failed"));
     } finally {
       setRechargeLoading(false);
     }
@@ -1052,6 +1088,7 @@ void loop() {
     setRfidLoading(true);
     setError(null);
     setRfidMessage(null);
+    setRfidError(null);
     try {
       const payload = {
         userId: rfidTarget,
@@ -1071,8 +1108,10 @@ void loop() {
         setRfidMessage("RFID assigned");
       }
       await loadData();
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "RFID update failed");
+    } catch (err) {
+      const message = getErrorMessage(err, "RFID update failed");
+      setRfidError(message);
+      setError(message);
     } finally {
       setRfidLoading(false);
     }
@@ -1108,6 +1147,7 @@ void loop() {
 
   const handleDeleteUser = async (userId: string) => {
     setError(null);
+    if (!window.confirm("Delete this user permanently?")) return;
     const res = await fetch(`/api/admin/users?userId=${userId}`, {
       method: "DELETE",
     });
@@ -1122,6 +1162,7 @@ void loop() {
   const handleStopResetMotor = async (userId: string) => {
     setError(null);
     setStatusMessage(null);
+    if (!window.confirm("Stop and reset this user's motor session?")) return;
     setStopResetLoadingUserId(userId);
     try {
       const res = await fetch("/api/motor/stop", {
@@ -1136,8 +1177,8 @@ void loop() {
       }
       setStatusMessage("User motor stopped/reset successfully");
       await loadData();
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Failed to stop/reset motor");
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to stop/reset motor"));
     } finally {
       setStopResetLoadingUserId(null);
     }
@@ -1168,8 +1209,8 @@ void loop() {
         setStatusMessage("User motor started");
       }
       await loadData();
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Failed to start motor");
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to start motor"));
     } finally {
       setStartLoadingUserId(null);
     }
@@ -1178,6 +1219,7 @@ void loop() {
   const handleSuspendUser = async (userId: string) => {
     setError(null);
     setSuspendError(null);
+    if (!window.confirm("Suspend this user?")) return;
     const reasonPrompt = prompt("Suspend reason?");
     if (reasonPrompt === null) return;
     const reason = reasonPrompt.trim() || undefined;
@@ -1263,6 +1305,12 @@ void loop() {
             >
               Download History
             </a>
+            <a
+              href="/admin/change-password"
+              className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
+            >
+              Change Password
+            </a>
             <button
               onClick={() => signOut({ callbackUrl: "/admin/login" })}
               className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
@@ -1299,21 +1347,9 @@ void loop() {
           </div>
         </section>
 
-        {error && (
-          <div className="rounded-lg border border-red-500/40 bg-red-900/40 px-3 py-2 text-sm text-red-100">
-            {error}
-          </div>
-        )}
-        {suspendError && (
-          <div className="rounded-lg border border-red-500/40 bg-red-900/40 px-3 py-2 text-sm text-red-100">
-            {suspendError}
-          </div>
-        )}
-        {statusMessage && (
-          <div className="rounded-lg border border-emerald-500/40 bg-emerald-900/40 px-3 py-2 text-sm text-emerald-100">
-            {statusMessage}
-          </div>
-        )}
+        {error ? <DashboardMessage variant="error" title="Dashboard error" message={error} actionLabel="Retry" onAction={loadData} /> : null}
+        {suspendError ? <DashboardMessage variant="error" title="User action failed" message={suspendError} actionLabel="Retry" onAction={loadData} /> : null}
+        {statusMessage ? <DashboardMessage variant="success" message={statusMessage} /> : null}
 
         {loadShedding && (
           <div className="rounded-xl border border-amber-500/40 bg-amber-900/30 px-4 py-3 text-sm text-amber-100 shadow-lg shadow-amber-900/30">
@@ -1332,315 +1368,75 @@ void loop() {
         )}
 
         {loading ? (
-          <div className="text-sm text-slate-300">Loading data...</div>
+          <DashboardMessage
+            variant="info"
+            title="Loading dashboard"
+            message="We are syncing users, queue status, and pending requests."
+          />
         ) : (
           <>
-            <section className="mx-auto grid w-full max-w-5xl gap-4 lg:grid-cols-3">
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 shadow-xl shadow-slate-950/40">
-                <div className="text-sm text-slate-400">Create User</div>
-                <input
-                  className="mt-3 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400"
-                  placeholder="username"
-                  value={newUser.username}
-                  onChange={(e) => setNewUser((p) => ({ ...p, username: e.target.value }))}
-                />
-                <input
-                  type="password"
-                  className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400"
-                  placeholder="password (min 6)"
-                  value={newUser.password}
-                  onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))}
-                />
-                <button
-                  onClick={handleCreateUser}
-                  disabled={createLoading}
-                  className="mt-3 w-full rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-900/30 hover:bg-emerald-400 disabled:opacity-60"
-                >
-                  {createLoading ? "Creating..." : "Create User"}
-                </button>
-              </div>
+            <AdminActionCards
+              newUser={newUser}
+              createLoading={createLoading}
+              onNewUserChange={setNewUser}
+              onCreateUser={handleCreateUser}
+              users={users}
+              rechargeTarget={rechargeTarget}
+              rechargeMinutes={rechargeMinutes}
+              rechargeLoading={rechargeLoading}
+              onRechargeTargetChange={setRechargeTarget}
+              onRechargeMinutesChange={setRechargeMinutes}
+              onRecharge={handleRecharge}
+              rfidTarget={rfidTarget}
+              rfidUid={rfidUid}
+              rfidLoading={rfidLoading}
+              rfidMessage={rfidMessage}
+              rfidError={rfidError}
+              onRfidTargetChange={setRfidTarget}
+              onRfidUidChange={setRfidUid}
+              onAssignRfid={handleAssignRfid}
+            />
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 shadow-xl shadow-slate-950/40">
-                <div className="text-sm text-slate-400">Recharge Minutes</div>
-                <select
-                  className="mt-3 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
-                  value={rechargeTarget}
-                  onChange={(e) => setRechargeTarget(e.target.value)}
-                >
-                  <option value="">Select user</option>
-                  {users.map((u) => (
-                    <option key={u._id} value={u._id}>
-                      {u.username} (bal {u.availableMinutes}m)
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  min={1}
-                  className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
-                  placeholder="minutes to add"
-                  value={rechargeMinutes}
-                  onChange={(e) => setRechargeMinutes(Math.max(0, Number(e.target.value)))}
-                />
-                <button
-                  onClick={handleRecharge}
-                  disabled={rechargeLoading || !rechargeTarget || rechargeMinutes <= 0}
-                  className="mt-3 w-full rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-900 shadow-lg shadow-cyan-900/30 hover:bg-cyan-300 disabled:opacity-60"
-                >
-                  {rechargeLoading ? "Recharging..." : "Recharge"}
-                </button>
-              </div>
+            <AdminUsersTable
+              users={users}
+              effectiveRuntimeHold={effectiveRuntimeHold}
+              cardModeActive={cardModeActive}
+              cardActiveUserId={cardActiveUserId}
+              startLoadingUserId={startLoadingUserId}
+              stopResetLoadingUserId={stopResetLoadingUserId}
+              adminStatus={adminStatus}
+              loadShedding={loadShedding}
+              deviceReady={deviceReady}
+              internetOnline={internetOnline}
+              onStartMotor={handleStartMotor}
+              onStopResetMotor={handleStopResetMotor}
+              onDeleteUser={handleDeleteUser}
+              onSuspendUser={handleSuspendUser}
+              onUnsuspendUser={handleUnsuspendUser}
+            />
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 shadow-xl shadow-slate-950/40">
-                <div className="text-sm text-slate-400">RFID Card Registration</div>
-                <select
-                  className="mt-3 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
-                  value={rfidTarget}
-                  onChange={(e) => setRfidTarget(e.target.value)}
-                >
-                  <option value="">Select user</option>
-                  {users.map((u) => (
-                    <option key={u._id} value={u._id}>
-                      {u.username}
-                      {u.rfidUid ? ` (${u.rfidUid})` : ""}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100 uppercase"
-                  placeholder="RFID UID (UPPERCASE)"
-                  value={rfidUid}
-                  onChange={(e) => setRfidUid(e.target.value.toUpperCase())}
-                />
-                <div className="mt-3 flex gap-2">
-                  <button
-                    onClick={() => handleAssignRfid(false)}
-                    disabled={rfidLoading || !rfidTarget || !rfidUid.trim()}
-                    className="flex-1 rounded-xl bg-indigo-400 px-4 py-2 text-sm font-semibold text-slate-900 shadow-lg shadow-indigo-900/30 hover:bg-indigo-300 disabled:opacity-60"
-                  >
-                    {rfidLoading ? "Assigning..." : "Assign"}
-                  </button>
-                  <button
-                    onClick={() => handleAssignRfid(true)}
-                    disabled={rfidLoading || !rfidTarget}
-                    className="flex-1 rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800/40 disabled:opacity-60"
-                  >
-                    Clear
-                  </button>
-                </div>
-                {rfidMessage && <div className="mt-2 text-xs text-emerald-300">{rfidMessage}</div>}
-              </div>
-            </section>
+            <AdminQueueSection
+              queue={queue}
+              users={users}
+              effectiveRuntimeHold={effectiveRuntimeHold}
+              getName={getName}
+            />
 
-            <section className="mx-auto w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm text-slate-400">Users</div>
-                <div className="text-lg font-semibold text-slate-100">Your tenant</div>
-              </div>
-            </div>
-          <div className="mt-4 overflow-x-auto">
-            <table className="min-w-[760px] w-full text-sm">
-              <thead className="text-slate-400">
-                <tr>
-                  <th className="px-2 py-2 text-left">Username</th>
-                  <th className="px-2 py-2 text-left">RFID</th>
-                  <th className="px-2 py-2 text-left">Admin</th>
-                  <th className="px-2 py-2 text-left">Available</th>
-                  <th className="px-2 py-2 text-left">Motor</th>
-                  <th className="px-2 py-2 text-left">Running Time</th>
-                  <th className="px-2 py-2 text-left">Status</th>
-                  <th className="whitespace-nowrap px-2 py-2 text-center">Use</th>
-                  <th className="whitespace-nowrap px-2 py-2 text-left">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800 text-slate-100">
-                {users.map((u) => (
-                  <tr key={u._id}>
-                    <td className="px-2 py-2">{u.username}</td>
-                    <td className="px-2 py-2 text-xs text-slate-300">{u.rfidUid || "-"}</td>
-                  <td className="px-2 py-2">{u.adminName ?? "You"}</td>
-                  <td className="px-2 py-2">{u.availableMinutes} m</td>
-                  <td className="px-2 py-2">
-                    {u.motorStatus === "RUNNING" && effectiveRuntimeHold ? "HOLD" : u.motorStatus}
-                  </td>
-                  <td className="px-2 py-2">{u.motorRunningTime ?? 0} m</td>
-                  <td className="px-2 py-2">
-                    {u.status ?? "active"}
-                    {u.suspendReason ? ` (${u.suspendReason})` : ""}
-                  </td>
-                  <td className="px-2 py-2 text-center text-xs text-slate-300">
-                    {cardModeActive && cardActiveUserId === u._id
-                      ? "Card"
-                      : u.motorStatus === "RUNNING"
-                        ? "Web"
-                        : "-"}
-                  </td>
-                  <td className="px-2 py-2">
-                      <div className="flex min-w-0 flex-col gap-2 sm:min-w-[220px] sm:flex-row sm:flex-wrap">
-                        <button
-                          onClick={() => handleStartMotor(u._id, (u.motorRunningTime && u.motorRunningTime > 0) ? u.motorRunningTime : 5)}
-                          disabled={
-                            startLoadingUserId === u._id ||
-                            adminStatus !== "active" ||
-                            Boolean(loadShedding) ||
-                            deviceReady === false ||
-                            !internetOnline ||
-                            u.status === "suspended"
-                          }
-                          className="w-full rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-800/50 disabled:opacity-60 sm:w-auto"
-                        >
-                          {startLoadingUserId === u._id ? "Starting..." : "Start Motor"}
-                        </button>
-                        <button
-                          onClick={() => handleStopResetMotor(u._id)}
-                          disabled={stopResetLoadingUserId === u._id}
-                          className="w-full rounded-lg border border-cyan-500 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-800/50 disabled:opacity-60 sm:w-auto"
-                        >
-                          {stopResetLoadingUserId === u._id ? "Processing..." : "Stop/Reset"}
-                        </button>
-                        <button
-                          onClick={() => handleDeleteUser(u._id)}
-                          className="w-full rounded-lg border border-red-500 px-2 py-1 text-xs text-red-700 hover:bg-red-50 sm:w-auto"
-                        >
-                          Delete
-                        </button>
-                        {u.status === "suspended" ? (
-                          <button
-                            onClick={() => handleUnsuspendUser(u._id)}
-                            className="w-full rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 sm:w-auto"
-                          >
-                            Unsuspend
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleSuspendUser(u._id)}
-                            className="w-full rounded-lg border border-amber-500 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50 sm:w-auto"
-                          >
-                            Suspend
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                  {users.length === 0 && (
-                    <tr>
-                      <td className="px-2 py-3 text-slate-400" colSpan={8}>
-                        No users yet.
-                      </td>
-                    </tr>
-                  )}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+            <AdminMinuteRequestsSection
+              requests={requests}
+              users={users}
+              onApproveRequest={handleApproveRequest}
+              onDeclineRequest={handleDeclineRequest}
+              getName={getName}
+            />
 
-            <section className="mx-auto w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
-              <div className="text-sm text-slate-400">Queue / Activity</div>
-              <div className="mt-2 text-lg font-semibold text-slate-100">Running & Waiting</div>
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {queue.map((q) => {
-                  const userMap = Object.fromEntries(users.map((u) => [u._id, u.username]));
-                  const uname = getName(q.userId, userMap);
-                  return (
-                    <div
-                      key={q._id}
-                      className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-sm text-slate-100"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span>Pos #{q.position}</span>
-                        <span className="text-xs uppercase text-cyan-200">
-                          {q.status === "RUNNING" && effectiveRuntimeHold ? "HOLD" : q.status}
-                        </span>
-                      </div>
-                      <div className="mt-2 text-slate-300">User: {uname}</div>
-                      <div className="text-slate-400">Req: {q.requestedMinutes}m</div>
-                    </div>
-                  );
-                })}
-                {queue.length === 0 && (
-                  <div className="text-sm text-slate-400">No active queue.</div>
-                )}
-              </div>
-            </section>
-
-            <section className="mx-auto w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
-              <div className="text-sm text-slate-400">Minute Requests</div>
-              <div className="mt-3 text-xs text-slate-400">
-                Pending requests from your users
-              </div>
-              <div className="mt-4 space-y-3">
-                {requests.length === 0 && <p className="text-sm text-slate-300">No pending requests.</p>}
-                {requests.map((r) => {
-                  const userMap = Object.fromEntries(users.map((u) => [u._id, u.username]));
-                  const uname = getName(r.userId, userMap);
-                  return (
-                    <div
-                      key={r._id}
-                      className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100"
-                    >
-                      <div>
-                        <div>User: {uname}</div>
-                        <div className="text-slate-400">Minutes: {r.minutes}</div>
-                        <div className="text-slate-500 text-xs">
-                          {new Date(r.createdAt).toLocaleString()}
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleApproveRequest(r._id)}
-                          className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          onClick={() => handleDeclineRequest(r._id)}
-                          className="rounded-lg border border-red-500 px-3 py-2 text-xs text-red-700 hover:bg-red-50"
-                        >
-                          Decline
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section className="mx-auto w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm text-slate-400">Motor Control Program</div>
-                  <div className="text-xs text-slate-500">
-                    Admin-based config with your ADMIN_ID
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <select
-                    value={espCodeType}
-                    onChange={(e) =>
-                      setEspCodeType(e.target.value as "arduino" | "micropython" | "esp8266" | "ttgo" | "stm32")
-                    }
-                    className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
-                  >
-                    <option value="arduino">ESP32 Arduino code</option>
-                    <option value="micropython">ESP32 MicroPython code</option>
-                    <option value="esp8266">ESP8266 Arduino code</option>
-                    <option value="ttgo">TTGO T-Call AM-036 (SIM800)</option>
-                    <option value="stm32">STM32 + SIM800L code</option>
-                  </select>
-                  <button
-                    onClick={copyEsp32Code}
-                    className="rounded-lg border border-cyan-500 px-3 py-1 text-xs text-cyan-200 hover:bg-cyan-800/40"
-                  >
-                    {codeCopied ? "Copied" : "Copy Code"}
-                  </button>
-                </div>
-              </div>
-              <pre className="mt-3 overflow-x-auto rounded-xl border border-slate-700 bg-black p-3 text-xs text-green-300">
-{esp32Code}
-              </pre>
-            </section>
+            <AdminFirmwareCodeSection
+              espCodeType={espCodeType}
+              onEspCodeTypeChange={setEspCodeType}
+              onCopyCode={copyEsp32Code}
+              codeCopied={codeCopied}
+              esp32Code={esp32Code}
+            />
           </>
         )}
       </div>

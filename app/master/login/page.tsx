@@ -4,6 +4,7 @@ import { useState } from "react";
 import { getSession, signIn } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { getFriendlyLoginError } from "@/lib/login-error";
 
 export default function MasterLoginPage() {
   const router = useRouter();
@@ -30,7 +31,7 @@ export default function MasterLoginPage() {
     setLoading(false);
 
     if (res?.error) {
-      setError("Invalid credentials");
+      setError(getFriendlyLoginError(res.error));
       return;
     }
 
@@ -90,7 +91,7 @@ export default function MasterLoginPage() {
 
         <div className="mt-6 flex items-center justify-between text-xs text-slate-400">
           <Link href="/master/forgot-password" className="text-cyan-300 hover:text-cyan-200">
-            Forgot password?
+            Password help
           </Link>
           <Link href="/" className="text-cyan-300 hover:text-cyan-200">
             Go to Home

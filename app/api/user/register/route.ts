@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true, message: 'User created' });
-  } catch (error: any) {
+  } catch (error) {
     console.error('User register error:', error);
     return NextResponse.json({ error: 'Failed to register user' }, { status: 500 });
   }

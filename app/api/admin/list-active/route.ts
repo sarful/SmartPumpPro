@@ -10,7 +10,7 @@ export async function GET(_req: NextRequest) {
       .lean();
 
     return NextResponse.json({ admins });
-  } catch (error: any) {
+  } catch (error) {
     console.error('List active admins error:', error);
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: message, details: String(error) }, { status: 500 });

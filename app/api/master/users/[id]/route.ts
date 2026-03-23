@@ -1,16 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
 import { connectDB } from '@/lib/mongodb';
 import User from '@/models/User';
 import { Types } from 'mongoose';
+import { requireWebMutationSession } from '@/lib/web-mutation-auth';
 
 type ParamsObj = { id: string };
 
 export async function DELETE(req: NextRequest, context: { params: Promise<ParamsObj> }) {
-  const session = await auth();
-  if (!session || session.user.role !== 'master') {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const authResult = await requireWebMutationSession(['master']);
+  if (authResult.response) return authResult.response;
 
   const { id: userId } = await context.params;
   if (!userId || !Types.ObjectId.isValid(userId)) {

@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
 import { connectDB } from '@/lib/mongodb';
 import MinuteRequest from '@/models/MinuteRequest';
+import { requireWebMutationSession } from '@/lib/web-mutation-auth';
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session || session.user.role !== 'admin') {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const authResult = await requireWebMutationSession(['admin']);
+  if (authResult.response) return authResult.response;
+  const { session } = authResult;
 
   let body: { requestId?: string };
   try {

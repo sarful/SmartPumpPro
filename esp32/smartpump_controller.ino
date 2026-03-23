@@ -12,6 +12,7 @@
 
 const char* ADMIN_ID      = "PUT_ADMIN_ID_HERE";
 const char* API_HOST      = "http://192.168.1.10:3000";
+const char* DEVICE_KEY    = "PUT_YOUR_ESP32_DEVICE_SECRET_HERE";
 
 unsigned long lastPoll = 0;
 
@@ -38,6 +39,7 @@ void pollServer() {
 
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.begin(client, pollUrl);
+  http.addHeader("x-device-key", DEVICE_KEY);
 
   int httpCode = http.GET();
   if (httpCode != HTTP_CODE_OK) {

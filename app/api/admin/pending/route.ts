@@ -15,7 +15,7 @@ export async function GET(_req: NextRequest) {
       .select({ username: 1, status: 1 })
       .lean();
     return NextResponse.json({ admins });
-  } catch (error: any) {
+  } catch (error) {
     console.error('List pending admins error:', error);
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: message, details: String(error) }, { status: 500 });

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { connectDB } from "@/lib/mongodb";
 import User from "@/models/User";
 import Admin from "@/models/Admin";
@@ -7,6 +6,7 @@ import Queue from "@/models/Queue";
 import { addToQueue, getQueuePosition } from "@/lib/queue-engine";
 import { calculateUsedMinutes, stopMotorForUser } from "@/lib/timer-engine";
 import { isDeviceReadyEffective } from "@/lib/device-readiness";
+import { requireWebMutationSession } from "@/lib/web-mutation-auth";
 
 type Body = {
   userId?: string;
@@ -16,10 +16,8 @@ type Body = {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await auth();
-    if (!session || session.user.role !== "master") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const authResult = await requireWebMutationSession(["master"]);
+    if (authResult.response) return authResult.response;
 
     let body: Body;
     try {

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { getErrorMessage } from "@/lib/error-message";
 
 type PendingAdmin = { _id: string; username: string; status: string };
 
@@ -17,11 +18,6 @@ export default function MasterAdminsPage() {
   const isMaster = session?.user?.role === "master";
 
   useEffect(() => {
-    if (status === "authenticated" && isMaster) {
-      router.replace("/master/dashboard");
-      return;
-    }
-
     if (status === "loading") return;
     if (!isMaster) return;
     const loadPending = async () => {
@@ -32,8 +28,8 @@ export default function MasterAdminsPage() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Failed to load pending admins");
         setAdmins(data.admins || []);
-      } catch (err: any) {
-        setError(err instanceof Error ? err.message : "Unknown error");
+      } catch (err) {
+        setError(getErrorMessage(err, "Unknown error"));
       } finally {
         setLoading(false);
       }
@@ -54,8 +50,8 @@ export default function MasterAdminsPage() {
       if (!res.ok) throw new Error(data.error || "Approve failed");
       setActionMessage(`Approved ${data.admin.username}`);
       setAdmins((prev) => prev.filter((a) => a._id !== adminId));
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+    } catch (err) {
+      setError(getErrorMessage(err, "Unknown error"));
     }
   };
 
@@ -86,12 +82,20 @@ export default function MasterAdminsPage() {
           <p className="text-sm uppercase tracking-[0.2em] text-cyan-300">Master Console</p>
           <h1 className="mt-2 text-2xl font-semibold">Pending Admin Approvals</h1>
           <p className="text-sm text-slate-400">Review and approve admins.</p>
-          <button
-            onClick={() => signOut({ callbackUrl: "/admin/login" })}
-            className="mt-3 rounded-lg border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
-          >
-            Logout
-          </button>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => router.push("/master/dashboard")}
+              className="rounded-lg border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
+            >
+              Back to Dashboard
+            </button>
+            <button
+              onClick={() => signOut({ callbackUrl: "/master/login" })}
+              className="rounded-lg border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
+            >
+              Logout
+            </button>
+          </div>
         </div>
 
         {error && (

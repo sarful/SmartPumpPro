@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import { getMobileAccessPayload } from "@/lib/mobile-request-auth";
 import UsageHistory from "@/models/UsageHistory";
+import { reportIncident } from "@/lib/observability";
 
 type HistoryLean = {
   _id: unknown;
@@ -21,7 +22,7 @@ function getPopulatedUsername(value: unknown): string | null {
 
 export async function GET(req: NextRequest) {
   try {
-    const payload = getMobileAccessPayload(req);
+    const payload = await getMobileAccessPayload(req);
     if (!payload) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const limitRaw = Number(new URL(req.url).searchParams.get("limit") || "30");
@@ -55,7 +56,14 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ entries: mapped });
   } catch (error) {
-    console.error("mobile history error", error);
-    return NextResponse.json({ error: "Failed to load history logs" }, { status: 500 });
+    const requestId = await reportIncident({
+      error,
+      source: "mobile_history",
+      route: "/api/mobile/history",
+      platform: "mobile",
+      ip: req.headers.get("x-forwarded-for"),
+      userAgent: req.headers.get("user-agent"),
+    });
+    return NextResponse.json({ error: "Failed to load history logs", requestId }, { status: 500 });
   }
 }

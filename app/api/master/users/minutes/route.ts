@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Types } from "mongoose";
-import { auth } from "@/lib/auth";
 import { connectDB } from "@/lib/mongodb";
 import User from "@/models/User";
 import { logEvent } from "@/lib/usage-logger";
+import { requireWebMutationSession } from "@/lib/web-mutation-auth";
 
 type Body = {
   userId?: string;
@@ -13,10 +13,8 @@ type Body = {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await auth();
-    if (!session || session.user.role !== "master") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const authResult = await requireWebMutationSession(["master"]);
+    if (authResult.response) return authResult.response;
 
     let body: Body;
     try {

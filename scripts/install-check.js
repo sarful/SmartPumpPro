@@ -2,12 +2,29 @@
 require("./_load-env");
 const mongoose = require("mongoose");
 
-const requiredEnv = ["MONGODB_URI", "NEXTAUTH_SECRET"];
-const optionalEnv = ["NEXTAUTH_URL", "APP_BASE_URL", "ENABLE_PASSWORD_RESET_API"];
+const requiredEnv = [
+  "MONGODB_URI",
+  "NEXTAUTH_SECRET",
+  "ESP32_DEVICE_SECRET",
+  "CRON_SECRET",
+  "NEXTAUTH_URL",
+  "APP_BASE_URL",
+];
+const optionalEnv = ["MOBILE_JWT_SECRET", "MOBILE_MAX_SESSIONS"];
 
 function readEnv(name) {
   const value = process.env[name];
   return typeof value === "string" ? value.trim() : "";
+}
+
+function looksLikePlaceholder(value) {
+  return (
+    !value ||
+    /replace-with/i.test(value) ||
+    /your-/i.test(value) ||
+    /example/i.test(value) ||
+    /changeme/i.test(value)
+  );
 }
 
 async function checkMongo(mongoUri) {
@@ -32,6 +49,18 @@ async function run() {
   const secret = readEnv("NEXTAUTH_SECRET");
   if (secret && secret.length < 32) {
     failures.push("NEXTAUTH_SECRET must be at least 32 characters");
+  }
+  const mobileJwt = readEnv("MOBILE_JWT_SECRET");
+  if (mobileJwt && mobileJwt.length < 32) {
+    failures.push("MOBILE_JWT_SECRET must be at least 32 characters");
+  }
+  const esp32Secret = readEnv("ESP32_DEVICE_SECRET");
+  if (esp32Secret && looksLikePlaceholder(esp32Secret)) {
+    failures.push("ESP32_DEVICE_SECRET must be replaced with a real secret");
+  }
+  const cronSecret = readEnv("CRON_SECRET");
+  if (cronSecret && looksLikePlaceholder(cronSecret)) {
+    failures.push("CRON_SECRET must be replaced with a real secret");
   }
 
   const mongoUri = readEnv("MONGODB_URI");

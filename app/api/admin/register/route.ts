@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
         ? 'Admin created. Waiting for approval.'
         : 'Admin created and auto-approved.',
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Admin register error:', error);
     return NextResponse.json({ error: 'Failed to register admin' }, { status: 500 });
   }

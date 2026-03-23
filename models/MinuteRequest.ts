@@ -22,6 +22,13 @@ const minuteRequestSchema = new Schema<MinuteRequestDocument>(
 );
 
 minuteRequestSchema.index({ adminId: 1, status: 1, createdAt: -1 });
+minuteRequestSchema.index(
+  { userId: 1, status: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: 'pending' },
+  },
+);
 
 export const MinuteRequest: Model<MinuteRequestDocument> =
   mongoose.models.MinuteRequest ||

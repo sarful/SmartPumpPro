@@ -5,6 +5,26 @@ import UsageHistory from '@/models/UsageHistory';
 import Admin from '@/models/Admin';
 import { isDeviceOnline, isDeviceReadyEffective } from '@/lib/device-readiness';
 
+type PopulatedRef = string | { _id?: unknown; username?: string };
+
+type HistoryEntry = {
+  _id?: unknown;
+  date?: Date | string;
+  event?: string;
+  adminId?: PopulatedRef;
+  userId?: PopulatedRef;
+  usedMinutes?: number;
+  addedMinutes?: number;
+  meta?: unknown;
+};
+
+type AdminReadinessDoc = {
+  _id: unknown;
+  loadShedding?: boolean;
+  deviceReady?: boolean;
+  deviceLastSeenAt?: Date | string | null;
+};
+
 function escapeCsv(value: unknown): string {
   const str = String(value ?? '');
   if (str.includes(',') || str.includes('"') || str.includes('\n')) {
@@ -40,7 +60,7 @@ function getReadinessFromMeta(meta: unknown) {
   };
 }
 
-function getEntryAdminId(entry: any): string {
+function getEntryAdminId(entry: HistoryEntry): string {
   if (!entry?.adminId) return '';
   if (typeof entry.adminId === 'string') return entry.adminId;
   if (entry.adminId?._id) return String(entry.adminId._id);
@@ -73,9 +93,10 @@ export async function GET(req: NextRequest) {
     .sort({ date: -1 })
     .limit(limit)
     .lean();
+  const historyEntries = entries as HistoryEntry[];
 
   const adminIds = Array.from(
-    new Set(entries.map((entry: any) => getEntryAdminId(entry)).filter(Boolean)),
+    new Set(historyEntries.map((entry) => getEntryAdminId(entry)).filter(Boolean)),
   );
   const adminDocs = adminIds.length
     ? await Admin.find({ _id: { $in: adminIds } })
@@ -83,7 +104,7 @@ export async function GET(req: NextRequest) {
         .lean()
     : [];
   const adminReadinessMap = new Map<string, { deviceReady: string; loadShedding: string; internetOnline: string }>();
-  for (const admin of adminDocs as any[]) {
+  for (const admin of adminDocs as AdminReadinessDoc[]) {
     const deviceReady = isDeviceReadyEffective(admin);
     const online = isDeviceOnline(admin.deviceLastSeenAt);
     const load = (Boolean(admin.loadShedding) && online) || !deviceReady;
@@ -108,7 +129,7 @@ export async function GET(req: NextRequest) {
       'systemInternet',
       'meta',
     ];
-    const rows = entries.map((entry: any) =>
+    const rows = historyEntries.map((entry) =>
       (() => {
         const readinessFromMeta = getReadinessFromMeta(entry.meta);
         const adminFallback = adminReadinessMap.get(getEntryAdminId(entry));
@@ -121,8 +142,8 @@ export async function GET(req: NextRequest) {
         entry._id ? String(entry._id) : '',
         entry.date ? new Date(entry.date).toISOString() : '',
         entry.event ?? '',
-        entry.adminId?.username ?? '',
-        entry.userId?.username ?? '',
+        typeof entry.adminId === 'object' ? entry.adminId?.username ?? '' : '',
+        typeof entry.userId === 'object' ? entry.userId?.username ?? '' : '',
         entry.usedMinutes ?? '',
         entry.addedMinutes ?? '',
         readiness.deviceReady,
@@ -145,5 +166,5 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ entries });
+  return NextResponse.json({ entries: historyEntries });
 }
