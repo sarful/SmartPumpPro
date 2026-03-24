@@ -77,50 +77,578 @@ export default function AdminDashboardPage() {
   const displayInternetOnline = internetOnline && deviceReady !== false;
   const effectiveRuntimeHold = displayLoadShedding || !displayInternetOnline;
 
-  const esp32ArduinoCode = `#include <WiFiManager.h>
+  const esp32ArduinoCode = `/*
+===========================================================
+HARDWARE WIRING TABLE (ESP32 + RFID + LED + MOTOR)
+===========================================================
+
+WIFI
+----
+Uses WiFiManager (auto config portal)
+SSID: ESP32-Setup
+
+RFID RC522 (SPI)
+----------------
+RC522 SDA (SS)  -> GPIO5
+RC522 SCK       -> GPIO18
+RC522 MOSI      -> GPIO23
+RC522 MISO      -> GPIO19
+RC522 RST       -> GPIO13
+RC522 VCC       -> 3.3V
+RC522 GND       -> GND
+
+LED CONNECTION (220 ohm resistor)
+---------------------------------
+Motor LED        -> GPIO16
+Load LED         -> GPIO17
+Device LED       -> GPIO4
+Internet OK LED  -> GPIO2
+Internet FAIL    -> GPIO15
+
+INPUT SIGNALS
+-------------
+Load Pin         -> GPIO32
+Device Ready     -> GPIO33
+
+OUTPUT
+------
+Motor Relay      -> GPIO25
+
+===========================================================
+*/
+
+#include <WiFiManager.h>
+#include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <SPI.h>
+#include <MFRC522.h>
 
 // =========================
-// PumpPilot ESP32 Firmware
+// PIN CONFIG
 // =========================
+#define MOTOR_PIN   25
+#define LOAD_PIN    32
+#define DEVICE_PIN  33
 
-// ---- PIN CONFIG ----
-#define MOTOR_PIN 2
+// RFID
+#define RFID_SS_PIN   5
+#define RFID_RST_PIN  13
+#define RFID_SCK_PIN  18
+#define RFID_MISO_PIN 19
+#define RFID_MOSI_PIN 23
+
+// LED
+#define LED_MOTOR     16
+#define LED_LOAD      17
+#define LED_DEVICE    4
+#define LED_NET_OK    2
+#define LED_NET_FAIL  15
+
+// =========================
+// CONFIG
+// =========================
+#define POLL_INTERVAL 5000UL
+#define FAIL_TIMEOUT  20000UL
+
+const char* API_URL = "https://pms.mechatronicslab.net/api/esp32/poll";
+const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
+const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
+
+// =========================
+// GLOBAL
+// =========================
+MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
+
+unsigned long lastPoll = 0;
+unsigned long lastSuccess = 0;
+
+// =========================
+// FUNCTIONS
+// =========================
+void setMotor(bool on) {
+  digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
+  digitalWrite(LED_MOTOR, on ? HIGH : LOW);
+}
+
+bool readLoad() {
+  return digitalRead(LOAD_PIN) == HIGH;
+}
+
+bool readDevice() {
+  return digitalRead(DEVICE_PIN) == HIGH;
+}
+
+void updateNetLED() {
+  if (WiFi.status() == WL_CONNECTED) {
+    digitalWrite(LED_NET_OK, HIGH);
+    digitalWrite(LED_NET_FAIL, LOW);
+  } else {
+    digitalWrite(LED_NET_OK, LOW);
+    static bool blinkState = false;
+    static unsigned long lastBlink = 0;
+    if (millis() - lastBlink > 500) {
+      lastBlink = millis();
+      blinkState = !blinkState;
+      digitalWrite(LED_NET_FAIL, blinkState ? HIGH : LOW);
+    }
+  }
+}
+
+String readRFID() {
+  if (!rfid.PICC_IsNewCardPresent()) return "";
+  if (!rfid.PICC_ReadCardSerial()) return "";
+
+  String uid = "";
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    uid += String(rfid.uid.uidByte[i], HEX);
+  }
+
+  uid.toUpperCase();
+  rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
+  return uid;
+}
+
+void pollServer() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  bool ls = readLoad();
+  bool dev = readDevice();
+
+  digitalWrite(LED_LOAD, ls ? HIGH : LOW);
+  digitalWrite(LED_DEVICE, dev ? HIGH : LOW);
+
+  String url = String(API_URL) +
+               "?adminId=" + ADMIN_ID +
+               "&ls=" + (ls ? "1" : "0") +
+               "&dev=" + (dev ? "1" : "0");
+
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  HTTPClient http;
+  if (!http.begin(client, url)) {
+    return;
+  }
+
+  http.addHeader("x-device-key", DEVICE_KEY);
+  int code = http.GET();
+
+  if (code == HTTP_CODE_OK) {
+    String payload = http.getString();
+
+    StaticJsonDocument<512> doc;
+    if (!deserializeJson(doc, payload)) {
+      const char* status = doc["motorStatus"] | "OFF";
+      bool backendLS = doc["loadShedding"] | false;
+
+      bool turnOn =
+        (strcmp(status, "RUNNING") == 0) &&
+        !backendLS &&
+        !ls &&
+        dev;
+
+      setMotor(turnOn);
+      lastSuccess = millis();
+    }
+  }
+
+  http.end();
+}
+
+void failSafe() {
+  if (millis() - lastSuccess > FAIL_TIMEOUT) {
+    setMotor(false);
+  }
+}
+
+// =========================
+// SETUP
+// =========================
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(MOTOR_PIN, OUTPUT);
+  pinMode(LOAD_PIN, INPUT);
+  pinMode(DEVICE_PIN, INPUT);
+
+  pinMode(LED_MOTOR, OUTPUT);
+  pinMode(LED_LOAD, OUTPUT);
+  pinMode(LED_DEVICE, OUTPUT);
+  pinMode(LED_NET_OK, OUTPUT);
+  pinMode(LED_NET_FAIL, OUTPUT);
+
+  digitalWrite(MOTOR_PIN, LOW);
+  digitalWrite(LED_MOTOR, LOW);
+  digitalWrite(LED_LOAD, LOW);
+  digitalWrite(LED_DEVICE, LOW);
+  digitalWrite(LED_NET_OK, LOW);
+  digitalWrite(LED_NET_FAIL, LOW);
+
+  WiFiManager wm;
+  wm.autoConnect("ESP32-Setup");
+
+  Serial.println("WiFi Connected");
+
+  SPI.begin(RFID_SCK_PIN, RFID_MISO_PIN, RFID_MOSI_PIN, RFID_SS_PIN);
+  rfid.PCD_Init();
+}
+
+// =========================
+// LOOP
+// =========================
+void loop() {
+  updateNetLED();
+
+  String uid = readRFID();
+  if (uid.length()) {
+    Serial.println("RFID: " + uid);
+  }
+
+  if (millis() - lastPoll > POLL_INTERVAL) {
+    lastPoll = millis();
+    pollServer();
+  }
+
+  failSafe();
+}`;
+
+  const esp32MicroPythonCode = `"""
+===========================================================
+HARDWARE WIRING TABLE (ESP32 + RFID + LED + MOTOR)
+===========================================================
+
+WIFI
+----
+Set WIFI_SSID / WIFI_PASS below.
+
+RFID RC522 (SPI)
+----------------
+RC522 SDA (SS)  -> GPIO5
+RC522 SCK       -> GPIO18
+RC522 MOSI      -> GPIO23
+RC522 MISO      -> GPIO19
+RC522 RST       -> GPIO13
+RC522 VCC       -> 3.3V
+RC522 GND       -> GND
+
+LED CONNECTION (220 ohm resistor)
+---------------------------------
+Motor LED        -> GPIO16
+Load LED         -> GPIO17
+Device LED       -> GPIO4
+Internet OK LED  -> GPIO2
+Internet FAIL    -> GPIO15
+
+INPUT SIGNALS
+-------------
+Load Pin         -> GPIO32
+Device Ready     -> GPIO33
+
+OUTPUT
+------
+Motor Relay      -> GPIO25
+
+Requires:
+- urequests
+- mfrc522.py driver on the board filesystem
+===========================================================
+"""
+
+import network
+import time
+from machine import Pin, SPI
+import urequests
+import ujson
+from mfrc522 import MFRC522
+
+# =========================
+# CONFIG
+# =========================
+WIFI_SSID = "YOUR_WIFI_NAME"
+WIFI_PASS = "YOUR_WIFI_PASSWORD"
+
+API_URL = "https://pms.mechatronicslab.net/api/esp32/poll"
+ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}"
+DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET"
+
+POLL_INTERVAL_MS = 5000
+FAIL_TIMEOUT_MS = 20000
+RFID_DEBOUNCE_MS = 3000
+HTTP_TIMEOUT_SEC = 8
+
+# =========================
+# PIN CONFIG
+# =========================
+MOTOR_PIN = 25
+LOAD_PIN = 32
+DEVICE_PIN = 33
+
+LED_MOTOR = 16
+LED_LOAD = 17
+LED_DEVICE = 4
+LED_NET_OK = 2
+LED_NET_FAIL = 15
+
+RFID_SS_PIN = 5
+RFID_RST_PIN = 13
+RFID_SCK_PIN = 18
+RFID_MISO_PIN = 19
+RFID_MOSI_PIN = 23
+
+# =========================
+# HARDWARE
+# =========================
+motor_pin = Pin(MOTOR_PIN, Pin.OUT)
+load_pin = Pin(LOAD_PIN, Pin.IN)
+device_pin = Pin(DEVICE_PIN, Pin.IN)
+
+led_motor = Pin(LED_MOTOR, Pin.OUT)
+led_load = Pin(LED_LOAD, Pin.OUT)
+led_device = Pin(LED_DEVICE, Pin.OUT)
+led_net_ok = Pin(LED_NET_OK, Pin.OUT)
+led_net_fail = Pin(LED_NET_FAIL, Pin.OUT)
+
+spi = SPI(
+    2,
+    baudrate=1000000,
+    polarity=0,
+    phase=0,
+    sck=Pin(RFID_SCK_PIN),
+    mosi=Pin(RFID_MOSI_PIN),
+    miso=Pin(RFID_MISO_PIN),
+)
+rfid = MFRC522(spi=spi, gpioRst=RFID_RST_PIN, gpioCs=RFID_SS_PIN)
+
+last_poll = 0
+last_success = 0
+last_rfid = 0
+last_uid = ""
+net_fail_state = 0
+net_fail_blink_at = 0
+
+
+def set_motor(on):
+    value = 1 if on else 0
+    motor_pin.value(value)
+    led_motor.value(value)
+
+
+def read_load():
+    return load_pin.value() == 1
+
+
+def read_device():
+    return device_pin.value() == 1
+
+
+def connect_wifi():
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+
+    if not wlan.isconnected():
+        print("[WiFi] Connecting...")
+        wlan.connect(WIFI_SSID, WIFI_PASS)
+        start = time.ticks_ms()
+        while not wlan.isconnected():
+            if time.ticks_diff(time.ticks_ms(), start) > 15000:
+                print("[WiFi] Failed. Restarting...")
+                time.sleep_ms(1000)
+                raise RuntimeError("WiFi connection failed")
+            time.sleep_ms(250)
+
+    print("[WiFi] Connected:", wlan.ifconfig())
+    return wlan
+
+
+def ensure_wifi(wlan):
+    if wlan.isconnected():
+        return
+
+    print("[WiFi] Reconnecting...")
+    wlan.disconnect()
+    wlan.connect(WIFI_SSID, WIFI_PASS)
+
+    start = time.ticks_ms()
+    while not wlan.isconnected() and time.ticks_diff(time.ticks_ms(), start) < 10000:
+        time.sleep_ms(250)
+
+
+def update_net_led(wlan):
+    global net_fail_state, net_fail_blink_at
+
+    if wlan.isconnected():
+        led_net_ok.value(1)
+        led_net_fail.value(0)
+        return
+
+    led_net_ok.value(0)
+    now = time.ticks_ms()
+    if time.ticks_diff(now, net_fail_blink_at) > 500:
+        net_fail_blink_at = now
+        net_fail_state = 0 if net_fail_state else 1
+        led_net_fail.value(net_fail_state)
+
+
+def read_rfid():
+    stat, _ = rfid.request(rfid.REQIDL)
+    if stat != rfid.OK:
+        return ""
+
+    stat, raw_uid = rfid.anticoll()
+    if stat != rfid.OK:
+        return ""
+
+    uid = "".join("{:02X}".format(part) for part in raw_uid)
+    return uid
+
+
+def poll_server(uid=""):
+    global last_success
+
+    if wlan.isconnected() is False:
+        return
+
+    ls = read_load()
+    dev = read_device()
+
+    led_load.value(1 if ls else 0)
+    led_device.value(1 if dev else 0)
+
+    url = "{}?adminId={}&ls={}&dev={}".format(
+        API_URL,
+        ADMIN_ID,
+        "1" if ls else "0",
+        "1" if dev else "0",
+    )
+    if uid:
+        url += "&uid={}".format(uid)
+
+    response = None
+    try:
+        response = urequests.get(
+            url,
+            headers={"x-device-key": DEVICE_KEY},
+            timeout=HTTP_TIMEOUT_SEC,
+        )
+
+        if response.status_code != 200:
+            print("[HTTP] code=", response.status_code)
+            return
+
+        payload = response.text
+        doc = ujson.loads(payload)
+
+        status = doc.get("motorStatus", "OFF")
+        backend_ls = doc.get("loadShedding", False)
+
+        turn_on = (status == "RUNNING") and (not backend_ls) and (not ls) and dev
+        set_motor(turn_on)
+        last_success = time.ticks_ms()
+
+        print("[POLL] status={} ls={} dev={} uid={}".format(status, backend_ls, dev, uid or "-"))
+
+    except Exception as exc:
+        print("[ERROR]", exc)
+    finally:
+        if response is not None:
+            response.close()
+
+
+def fail_safe():
+    if time.ticks_diff(time.ticks_ms(), last_success) > FAIL_TIMEOUT_MS:
+        set_motor(False)
+
+
+wlan = connect_wifi()
+
+while True:
+    ensure_wifi(wlan)
+    update_net_led(wlan)
+
+    uid = read_rfid()
+    now = time.ticks_ms()
+
+    if uid and (uid != last_uid or time.ticks_diff(now, last_rfid) > RFID_DEBOUNCE_MS):
+        last_uid = uid
+        last_rfid = now
+        print("RFID:", uid)
+        poll_server(uid)
+
+    if time.ticks_diff(now, last_poll) >= POLL_INTERVAL_MS:
+        last_poll = now
+        poll_server()
+
+    fail_safe()
+    time.sleep_ms(25)`;
+
+  const esp8266Code = `#include <ESP8266WiFi.h>
+#include <WiFiManager.h>
+#include <WiFiClientSecureBearSSL.h>
+#include <ESP8266HTTPClient.h>
+#include <ArduinoJson.h>
+
+/*
+===========================================================
+HARDWARE WIRING TABLE (ESP8266 / NodeMCU + MOTOR)
+===========================================================
+
+WIFI
+----
+Uses WiFiManager (auto config portal)
+SSID: ESP8266-Setup
+
+RECOMMENDED NODEMCU PINS
+------------------------
+Motor Relay      -> D1 (GPIO5)
+Load Pin         -> D2 (GPIO4)
+Device Ready Pin -> D5 (GPIO14)
+Status LED       -> D4 (GPIO2, built-in LED on many boards)
+
+NOTES
+-----
+- Adjust pins if your board wiring is different
+- GPIO2 is often active-low on built-in LED boards
+- This template does not include RFID because ESP8266 GPIO is tight
+
+===========================================================
+*/
+
+#define MOTOR_PIN 5
 #define LOAD_PIN 4
-#define DEVICE_PIN 5
+#define DEVICE_PIN 14
+#define STATUS_LED_PIN 2
 
-// ---- SIGNAL POLARITY TOGGLES ----
-// Set 1 if signal is ACTIVE LOW, else 0
-#define LOAD_ACTIVE_LOW 0
-#define DEVICE_READY_ACTIVE_LOW 1
+#define STATUS_LED_ACTIVE_LOW 1
+#define POLL_INTERVAL_MS 5000UL
+#define FAILSAFE_TIMEOUT_MS 20000UL
+#define HTTP_TIMEOUT_MS 8000UL
 
-// ---- TIMING ----
-#define POLL_INTERVAL_MS 5000
-#define HTTP_TIMEOUT_MS 8000
-
-// ---- SERVER CONFIG ----
-// Admin-based config with your ADMIN_ID
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
 const char* API_HOST = "https://pms.mechatronicslab.net";
 const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
 
 unsigned long lastPoll = 0;
+unsigned long lastSuccess = 0;
 
-bool readLoadSheddingPin() {
-  int raw = digitalRead(LOAD_PIN);
-  return LOAD_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+void writeStatusLed(bool on) {
+  digitalWrite(STATUS_LED_PIN, STATUS_LED_ACTIVE_LOW ? (on ? LOW : HIGH) : (on ? HIGH : LOW));
+}
+
+bool readLoadPin() {
+  return digitalRead(LOAD_PIN) == HIGH;
 }
 
 bool readDeviceReadyPin() {
-  int raw = digitalRead(DEVICE_PIN);
-  return DEVICE_READY_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+  return digitalRead(DEVICE_PIN) == HIGH;
 }
 
 void setMotor(bool on) {
   digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
-  Serial.printf("[LED] %s\\n", on ? "ON" : "OFF");
+  writeStatusLed(on);
+  Serial.printf("[MOTOR] %s\\n", on ? "ON" : "OFF");
 }
 
 void ensureWiFi() {
@@ -132,59 +660,38 @@ void ensureWiFi() {
   unsigned long start = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
     delay(250);
-    Serial.print(".");
   }
-  Serial.println();
 }
 
 void pollServer() {
   if (WiFi.status() != WL_CONNECTED) return;
 
-  bool localLS = readLoadSheddingPin();
+  bool localLS = readLoadPin();
   bool localDeviceReady = readDeviceReadyPin();
 
-  Serial.printf("[PIN] loadRaw=%d devRaw=%d ls=%d dev=%d\\n",
-                digitalRead(LOAD_PIN),
-                digitalRead(DEVICE_PIN),
-                localLS,
-                localDeviceReady);
-
-  WiFiClientSecure client;
-  client.setInsecure(); // quick test; use certificate pinning for hardened security
+  std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
+  client->setInsecure();
 
   HTTPClient http;
   String url = String(API_HOST) +
-               "/api/esp32/poll/?adminId=" + ADMIN_ID +
+               "/api/esp32/poll?adminId=" + ADMIN_ID +
                "&ls=" + (localLS ? "1" : "0") +
                "&dev=" + (localDeviceReady ? "1" : "0");
 
-  const char* headerKeys[] = {"Location"};
-  http.collectHeaders(headerKeys, 1);
   http.setConnectTimeout(HTTP_TIMEOUT_MS);
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.setReuse(false);
 
-  if (!http.begin(client, url)) {
+  if (!http.begin(*client, url)) {
     Serial.println("[HTTP] begin failed");
     return;
   }
 
   http.addHeader("x-device-key", DEVICE_KEY);
-
   int code = http.GET();
-  if (code == 301 || code == 302 || code == 307 || code == 308) {
-    String location = http.header("Location");
-    Serial.printf("[HTTP] redirect %d -> %s\\n", code, location.c_str());
-    http.end();
-    if (location.length() == 0 || !http.begin(client, location)) {
-      Serial.println("[HTTP] redirect begin failed");
-      return;
-    }
-    http.addHeader("x-device-key", DEVICE_KEY);
-    code = http.GET();
-  }
+
   if (code != HTTP_CODE_OK) {
-    Serial.printf("[HTTP] code=%d err=%s\\n", code, http.errorToString(code).c_str());
+    Serial.printf("[HTTP] code=%d\\n", code);
     http.end();
     return;
   }
@@ -200,38 +707,41 @@ void pollServer() {
   }
 
   const char* status = doc["motorStatus"] | "OFF";
-  bool loadShedding = doc["loadShedding"] | false;
-  bool backendDeviceReady = doc["deviceReady"] | false;
-  const char* adminName = doc["adminName"] | "unknown";
-
-  Serial.printf("[POLL] admin=%s status=%s ls=%d localLS=%d dev=%d backendDev=%d\\n",
-                adminName, status, loadShedding, localLS, localDeviceReady, backendDeviceReady);
+  bool backendLoadShedding = doc["loadShedding"] | false;
 
   bool turnOn =
-      (strcmp(status, "RUNNING") == 0) &&
-      !loadShedding &&
-      !localLS &&
-      localDeviceReady;
+    (strcmp(status, "RUNNING") == 0) &&
+    !backendLoadShedding &&
+    !localLS &&
+    localDeviceReady;
 
   setMotor(turnOn);
+  lastSuccess = millis();
+
+  Serial.printf("[POLL] status=%s ls=%d dev=%d\\n", status, backendLoadShedding, localDeviceReady);
+}
+
+void failSafe() {
+  if (millis() - lastSuccess > FAILSAFE_TIMEOUT_MS) {
+    setMotor(false);
+  }
 }
 
 void setup() {
   Serial.begin(115200);
-  delay(300);
 
   pinMode(MOTOR_PIN, OUTPUT);
-  digitalWrite(MOTOR_PIN, LOW);
-
   pinMode(LOAD_PIN, INPUT_PULLUP);
   pinMode(DEVICE_PIN, INPUT_PULLUP);
+  pinMode(STATUS_LED_PIN, OUTPUT);
 
-  WiFi.setSleep(false);
+  digitalWrite(MOTOR_PIN, LOW);
+  writeStatusLed(false);
 
   WiFiManager wm;
   wm.setConfigPortalTimeout(180);
-  if (!wm.autoConnect("PumpPilot-Setup")) {
-    Serial.println("[WiFi] Config timeout. Restarting...");
+
+  if (!wm.autoConnect("ESP8266-Setup")) {
     delay(2000);
     ESP.restart();
   }
@@ -242,324 +752,6 @@ void setup() {
 
 void loop() {
   ensureWiFi();
-  unsigned long now = millis();
-
-  if (now - lastPoll >= POLL_INTERVAL_MS) {
-    lastPoll = now;
-    pollServer();
-  }
-
-  delay(10);
-}`;
-
-  const esp32MicroPythonCode = `import network
-import time
-import machine
-import urequests
-import ujson
-
-# =========================
-# PumpPilot ESP32 MicroPython
-# =========================
-
-# ---------- CONFIG ----------
-WIFI_SSID = "YOUR_WIFI_NAME"
-WIFI_PASS = "YOUR_WIFI_PASSWORD"
-
-MOTOR_PIN = 2
-LOAD_PIN = 4
-DEVICE_PIN = 5
-
-# Set 1 if signal is ACTIVE LOW, else 0
-LOAD_ACTIVE_LOW = 0
-DEVICE_READY_ACTIVE_LOW = 1
-
-POLL_INTERVAL_MS = 5000
-HTTP_TIMEOUT_MS = 6  # seconds
-
-ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}"
-API_HOST = "https://pms.mechatronicslab.net"
-DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET"
-
-# ---------- SETUP ----------
-motor = machine.Pin(MOTOR_PIN, machine.Pin.OUT)
-load_pin = machine.Pin(LOAD_PIN, machine.Pin.IN, machine.Pin.PULL_UP)
-device_pin = machine.Pin(DEVICE_PIN, machine.Pin.IN, machine.Pin.PULL_UP)
-
-last_poll = 0
-
-# ---------- FUNCTIONS ----------
-
-def set_motor(on):
-    motor.value(1 if on else 0)
-    print("[LED]", "ON" if on else "OFF")
-
-def read_load_shedding():
-    raw = load_pin.value()
-    return (raw == 0) if LOAD_ACTIVE_LOW else (raw == 1)
-
-def read_device_ready():
-    raw = device_pin.value()
-    return (raw == 0) if DEVICE_READY_ACTIVE_LOW else (raw == 1)
-
-
-def connect_wifi():
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-
-    if not wlan.isconnected():
-        print("Connecting to WiFi...")
-        wlan.connect(WIFI_SSID, WIFI_PASS)
-
-        timeout_sec = 10
-        start = time.time()
-
-        while not wlan.isconnected():
-            if (time.time() - start) > timeout_sec:
-                print("WiFi Failed. Restarting...")
-                machine.reset()
-            time.sleep(0.25)
-
-    print("WiFi Connected:", wlan.ifconfig())
-    return wlan
-
-
-def ensure_wifi(wlan):
-    if not wlan.isconnected():
-        print("[WiFi] reconnecting...")
-        wlan.disconnect()
-        wlan.connect(WIFI_SSID, WIFI_PASS)
-        t0 = time.time()
-        while not wlan.isconnected() and (time.time() - t0) < 10:
-            time.sleep(0.25)
-        print("[WiFi] ok" if wlan.isconnected() else "[WiFi] reconnect failed")
-
-
-def poll_server(wlan):
-    if not wlan.isconnected():
-        return
-
-    raw_ls = load_pin.value()
-    raw_dev = device_pin.value()
-    local_ls = read_load_shedding()
-    local_dev = read_device_ready()
-
-    print("[PIN] loadRaw={} devRaw={} ls={} dev={}".format(raw_ls, raw_dev, local_ls, local_dev))
-
-    url = "{}/api/esp32/poll/?adminId={}&ls={}&dev={}".format(
-        API_HOST,
-        ADMIN_ID,
-        "1" if local_ls else "0",
-        "1" if local_dev else "0",
-    )
-
-    try:
-        response = urequests.get(url, headers={"x-device-key": DEVICE_KEY}, timeout=HTTP_TIMEOUT_MS)
-
-        if response.status_code != 200:
-            print("[HTTP] code=", response.status_code)
-            response.close()
-            return
-
-        payload = response.text
-        response.close()
-
-        doc = ujson.loads(payload)
-
-        status = doc.get("motorStatus", "OFF")
-        load_shedding = doc.get("loadShedding", False)
-        backend_dev = doc.get("deviceReady", False)
-        admin_name = doc.get("adminName", "unknown")
-
-        print("[POLL] admin={} status={} ls={} localLS={} dev={} backendDev={}".format(
-            admin_name,
-            status,
-            load_shedding,
-            local_ls,
-            local_dev,
-            backend_dev
-        ))
-
-        turn_on = (status == "RUNNING") and (not load_shedding) and (not local_ls) and local_dev
-        set_motor(turn_on)
-
-    except Exception as e:
-        print("[ERROR]", e)
-
-
-# ---------- MAIN ----------
-wlan = connect_wifi()
-
-while True:
-    ensure_wifi(wlan)
-
-    now = time.ticks_ms()
-
-    if time.ticks_diff(now, last_poll) >= POLL_INTERVAL_MS:
-        last_poll = now
-        poll_server(wlan)
-
-    time.sleep_ms(10)`;
-
-  const esp8266Code = `#include <ESP8266WiFi.h>
-#include <WiFiManager.h>
-#include <WiFiClientSecureBearSSL.h>
-#include <ESP8266HTTPClient.h>
-#include <ArduinoJson.h>
-
-// =========================
-// PumpPilot ESP8266 Firmware
-// =========================
-
-// NodeMCU example:
-// D4=GPIO2, D2=GPIO4, D1=GPIO5
-#define MOTOR_PIN 2
-#define LOAD_PIN 4
-#define DEVICE_PIN 5
-
-// Set 1 if signal is ACTIVE LOW, else 0
-#define LOAD_ACTIVE_LOW 0
-#define DEVICE_READY_ACTIVE_LOW 1
-
-#define POLL_INTERVAL_MS 5000
-#define HTTP_TIMEOUT_MS 8000
-
-const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
-const char* API_HOST = "https://pms.mechatronicslab.net";
-const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
-
-unsigned long lastPoll = 0;
-
-bool readLoadSheddingPin() {
-  int raw = digitalRead(LOAD_PIN);
-  return LOAD_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
-}
-
-bool readDeviceReadyPin() {
-  int raw = digitalRead(DEVICE_PIN);
-  return DEVICE_READY_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
-}
-
-void setMotor(bool on) {
-  digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
-  Serial.printf("[LED] %s\\n", on ? "ON" : "OFF");
-}
-
-void ensureWiFi() {
-  if (WiFi.status() == WL_CONNECTED) return;
-
-  Serial.println("[WiFi] Reconnecting...");
-  WiFi.reconnect();
-
-  unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
-    delay(250);
-    Serial.print(".");
-  }
-  Serial.println();
-}
-
-void pollServer() {
-  if (WiFi.status() != WL_CONNECTED) return;
-
-  bool localLS = readLoadSheddingPin();
-  bool localDeviceReady = readDeviceReadyPin();
-
-  Serial.printf("[PIN] loadRaw=%d devRaw=%d ls=%d dev=%d\\n",
-                digitalRead(LOAD_PIN),
-                digitalRead(DEVICE_PIN),
-                localLS,
-                localDeviceReady);
-
-  std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
-  client->setInsecure(); // quick test; use certificate pinning for hardened security
-
-  HTTPClient http;
-
-  String url = String(API_HOST) +
-               "/api/esp32/poll/?adminId=" + ADMIN_ID +
-               "&ls=" + (localLS ? "1" : "0") +
-               "&dev=" + (localDeviceReady ? "1" : "0");
-
-  const char* headerKeys[] = {"Location"};
-  http.collectHeaders(headerKeys, 1);
-  http.setConnectTimeout(HTTP_TIMEOUT_MS);
-  http.setTimeout(HTTP_TIMEOUT_MS);
-  http.setReuse(false);
-
-  if (!http.begin(*client, url)) {
-    Serial.println("[HTTP] begin failed");
-    return;
-  }
-
-  http.addHeader("x-device-key", DEVICE_KEY);
-
-  int code = http.GET();
-  if (code == 301 || code == 302 || code == 307 || code == 308) {
-    String location = http.header("Location");
-    Serial.printf("[HTTP] redirect %d -> %s\\n", code, location.c_str());
-    http.end();
-    if (location.length() == 0 || !http.begin(*client, location)) {
-      Serial.println("[HTTP] redirect begin failed");
-      return;
-    }
-    http.addHeader("x-device-key", DEVICE_KEY);
-    code = http.GET();
-  }
-
-  if (code != HTTP_CODE_OK) {
-    Serial.printf("[HTTP] code=%d err=%s\\n", code, http.errorToString(code).c_str());
-    http.end();
-    return;
-  }
-
-  String payload = http.getString();
-  http.end();
-
-  StaticJsonDocument<512> doc;
-  DeserializationError err = deserializeJson(doc, payload);
-
-  if (err) {
-    Serial.println("[JSON] parse error");
-    return;
-  }
-
-  const char* status = doc["motorStatus"] | "OFF";
-  bool loadShedding = doc["loadShedding"] | false;
-  bool backendDeviceReady = doc["deviceReady"] | false;
-  const char* adminName = doc["adminName"] | "unknown";
-
-  Serial.printf("[POLL] admin=%s status=%s ls=%d localLS=%d dev=%d backendDev=%d\\n",
-                adminName, status, loadShedding, localLS, localDeviceReady, backendDeviceReady);
-
-  bool turnOn = (strcmp(status, "RUNNING") == 0) && !loadShedding && !localLS && localDeviceReady;
-
-  setMotor(turnOn);
-}
-
-void setup() {
-  Serial.begin(115200);
-
-  pinMode(MOTOR_PIN, OUTPUT);
-  digitalWrite(MOTOR_PIN, LOW);
-
-  pinMode(LOAD_PIN, INPUT_PULLUP);
-  pinMode(DEVICE_PIN, INPUT_PULLUP);
-
-  WiFiManager wm;
-  wm.setConfigPortalTimeout(180);
-
-  if (!wm.autoConnect("PumpPilot-Setup")) {
-    delay(2000);
-    ESP.restart();
-  }
-
-  Serial.print("WiFi Connected. IP: ");
-  Serial.println(WiFi.localIP());
-}
-
-void loop() {
-  ensureWiFi();
 
   unsigned long now = millis();
   if (now - lastPoll >= POLL_INTERVAL_MS) {
@@ -567,41 +759,368 @@ void loop() {
     pollServer();
   }
 
+  failSafe();
   delay(10);
 }`;
 
   const ttgoTCallCode = `#define TINY_GSM_MODEM_SIM800
+/*
+===========================================================
+HARDWARE WIRING TABLE (TTGO T-CALL + RFID + LED + MOTOR)
+===========================================================
+
+TTGO T-CALL (SIM800L built-in)
+------------------------------
+MODEM_TX        -> GPIO27
+MODEM_RX        -> GPIO26
+MODEM_POWER_ON  -> GPIO23
+MODEM_RST       -> GPIO5
+MODEM_PWKEY     -> GPIO4
+
+DO NOT USE ABOVE PINS FOR OTHER PURPOSE
+
+RC522 (SPI)
+-----------
+RC522 SDA (SS)  -> GPIO15
+RC522 SCK       -> GPIO18
+RC522 MOSI      -> GPIO23 (shared SPI, safe)
+RC522 MISO      -> GPIO19
+RC522 RST       -> GPIO13
+RC522 VCC       -> 3.3V
+RC522 GND       -> GND
+
+LED CONNECTION
+--------------
+Motor LED        -> GPIO16
+Load LED         -> GPIO17
+Device LED       -> GPIO14
+Internet OK LED  -> GPIO2
+Internet FAIL LED-> GPIO12
+
+INPUT SIGNALS
+-------------
+Load Pin         -> GPIO32 (INPUT_PULLUP)
+Device Ready Pin -> GPIO33 (INPUT_PULLUP)
+
+OUTPUT
+------
+Motor Relay      -> GPIO25
+*/
+
+#include <Wire.h>
+#include <HardwareSerial.h>
+#include <TinyGsmClient.h>
+#include <ArduinoJson.h>
+#include <SPI.h>
+#include <MFRC522.h>
+
+// =========================
+// MODEM (DO NOT TOUCH)
+// =========================
+#define MODEM_RST        5
+#define MODEM_PWKEY      4
+#define MODEM_POWER_ON   23
+#define MODEM_TX         27
+#define MODEM_RX         26
+
+// =========================
+// USER PINS (SAFE)
+// =========================
+#define MOTOR_PIN        25
+#define LOAD_PIN         32
+#define DEVICE_PIN       33
+
+// =========================
+// RFID (SPI)
+// =========================
+#define RFID_SS_PIN      15
+#define RFID_RST_PIN     13
+#define RFID_SCK_PIN     18
+#define RFID_MISO_PIN    19
+#define RFID_MOSI_PIN    23
+
+// =========================
+// LED PINS
+// =========================
+#define LED_MOTOR        16
+#define LED_LOAD         17
+#define LED_DEVICE       14
+#define LED_NET_OK       2
+#define LED_NET_FAIL     12
+
+// =========================
+// CONFIG
+// =========================
+#define POLL_INTERVAL_MS     5000
+#define RFID_DEBOUNCE_MS     3000
+#define FAILSAFE_TIMEOUT_MS  20000
+
+const char APN[] = "internet";
+const char* API_HOST = "pms.mechatronicslab.net";
+const int API_PORT = 80;
+
+const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
+const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
+
+// =========================
+// GLOBALS
+// =========================
+HardwareSerial SerialAT(1);
+TinyGsm modem(SerialAT);
+TinyGsmClient client(modem);
+MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
+
+unsigned long lastPoll = 0;
+unsigned long lastRFID = 0;
+unsigned long lastSuccess = 0;
+
+// =========================
+// MODEM POWER
+// =========================
+void setupModem() {
+  pinMode(MODEM_POWER_ON, OUTPUT);
+  pinMode(MODEM_PWKEY, OUTPUT);
+  pinMode(MODEM_RST, OUTPUT);
+
+  digitalWrite(MODEM_POWER_ON, HIGH);
+  delay(100);
+
+  digitalWrite(MODEM_PWKEY, HIGH);
+  delay(1000);
+  digitalWrite(MODEM_PWKEY, LOW);
+}
+
+// =========================
+// GSM CONNECT
+// =========================
+bool connectGSM() {
+  modem.restart();
+  if (!modem.waitForNetwork(60000L)) return false;
+  if (!modem.gprsConnect(APN, "", "")) return false;
+  return true;
+}
+
+// =========================
+// IO
+// =========================
+bool readLoad() { return digitalRead(LOAD_PIN); }
+bool readDevice() { return digitalRead(DEVICE_PIN); }
+
+void setMotor(bool on) {
+  digitalWrite(MOTOR_PIN, on);
+  digitalWrite(LED_MOTOR, on);
+}
+
+// =========================
+// HTTP
+// =========================
+String httpGET(String path, int &code) {
+  code = -1;
+
+  if (!client.connect(API_HOST, API_PORT)) return "";
+
+  client.print(String("GET ") + path + " HTTP/1.1\\r\\n");
+  client.print(String("Host: ") + API_HOST + "\\r\\n");
+  client.print(String("x-device-key: ") + DEVICE_KEY + "\\r\\n");
+  client.print("Connection: close\\r\\n\\r\\n");
+
+  unsigned long t = millis();
+  while (!client.available() && millis() - t < 10000) delay(10);
+
+  String statusLine = client.readStringUntil('\\n');
+  int s = statusLine.indexOf(' ');
+  code = statusLine.substring(s + 1).toInt();
+
+  while (client.connected()) {
+    String line = client.readStringUntil('\\n');
+    if (line == "\\r") break;
+  }
+
+  String body = client.readString();
+  client.stop();
+  return body;
+}
+
+// =========================
+// RFID
+// =========================
+String readRFID() {
+  if (!rfid.PICC_IsNewCardPresent()) return "";
+  if (!rfid.PICC_ReadCardSerial()) return "";
+
+  String uid = "";
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    uid += String(rfid.uid.uidByte[i], HEX);
+  }
+
+  uid.toUpperCase();
+  rfid.PICC_HaltA();
+  return uid;
+}
+
+// =========================
+// POLL SERVER
+// =========================
+void pollServer() {
+  bool ls = readLoad();
+  bool dev = readDevice();
+
+  digitalWrite(LED_LOAD, ls);
+  digitalWrite(LED_DEVICE, dev);
+
+  String path = "/api/esp32/poll?adminId=" + String(ADMIN_ID) +
+                "&ls=" + (ls ? "1" : "0") +
+                "&dev=" + (dev ? "1" : "0");
+
+  int code;
+  String body = httpGET(path, code);
+
+  if (code != 200) return;
+
+  StaticJsonDocument<512> doc;
+  if (deserializeJson(doc, body)) return;
+
+  const char* status = doc["motorStatus"] | "OFF";
+  bool backendLS = doc["loadShedding"] | false;
+
+  bool turnOn =
+      (strcmp(status, "RUNNING") == 0) &&
+      !backendLS &&
+      !ls &&
+      dev;
+
+  setMotor(turnOn);
+  lastSuccess = millis();
+}
+
+// =========================
+// FAILSAFE
+// =========================
+void failSafe() {
+  if (millis() - lastSuccess > FAILSAFE_TIMEOUT_MS) {
+    setMotor(false);
+  }
+}
+
+// =========================
+// NET LED
+// =========================
+void updateNetLED() {
+  if (modem.isGprsConnected()) {
+    digitalWrite(LED_NET_OK, HIGH);
+    digitalWrite(LED_NET_FAIL, LOW);
+  } else {
+    digitalWrite(LED_NET_OK, LOW);
+    static bool state = false;
+    static unsigned long last = 0;
+
+    if (millis() - last > 500) {
+      last = millis();
+      state = !state;
+      digitalWrite(LED_NET_FAIL, state);
+    }
+  }
+}
+
+// =========================
+// SETUP
+// =========================
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(MOTOR_PIN, OUTPUT);
+  pinMode(LOAD_PIN, INPUT_PULLUP);
+  pinMode(DEVICE_PIN, INPUT_PULLUP);
+
+  pinMode(LED_MOTOR, OUTPUT);
+  pinMode(LED_LOAD, OUTPUT);
+  pinMode(LED_DEVICE, OUTPUT);
+  pinMode(LED_NET_OK, OUTPUT);
+  pinMode(LED_NET_FAIL, OUTPUT);
+
+  setupModem();
+
+  SerialAT.begin(9600, SERIAL_8N1, MODEM_RX, MODEM_TX);
+
+  SPI.begin(RFID_SCK_PIN, RFID_MISO_PIN, RFID_MOSI_PIN, RFID_SS_PIN);
+  rfid.PCD_Init();
+
+  connectGSM();
+}
+
+// =========================
+// LOOP
+// =========================
+void loop() {
+  if (!modem.isGprsConnected()) {
+    connectGSM();
+  }
+
+  updateNetLED();
+
+  String uid = readRFID();
+  if (uid.length() && millis() - lastRFID > RFID_DEBOUNCE_MS) {
+    lastRFID = millis();
+    // RFID event send optional
+  }
+
+  if (millis() - lastPoll > POLL_INTERVAL_MS) {
+    lastPoll = millis();
+    pollServer();
+  }
+
+  failSafe();
+}`;
+
+  const stm32Sim800lCode = `#define TINY_GSM_MODEM_SIM800
 #define TINY_GSM_RX_BUFFER 1024
 
 #include <TinyGsmClient.h>
 #include <ArduinoJson.h>
 
+/*
+===========================================================
+HARDWARE WIRING TABLE (STM32 + SIM800L + MOTOR)
+===========================================================
+
+SERIAL
+------
+SerialMon -> USB serial
+SerialAT  -> SIM800L serial pins (map per board)
+
+RECOMMENDED STM32 EXAMPLE PINS
+------------------------------
+Motor Relay      -> PA8
+Load Pin         -> PB0
+Device Ready Pin -> PB1
+Status LED       -> PC13 (adjust if your board differs)
+
+NOTES
+-----
+- Update APN / GPRS credentials for your SIM
+- Update SerialAT mapping for your STM32 board
+- This template is GSM-based and does not include RFID
+
+===========================================================
+*/
+
 #define SerialMon Serial
 #define SerialAT  Serial1
 
-// ---------- TTGO T-Call pins ----------
-#define MODEM_TX       27
-#define MODEM_RX       26
-#define MODEM_PWRKEY   4
-#define MODEM_POWER_ON 23
-#define MODEM_RST      5
+#define MOTOR_PIN      PA8
+#define LOAD_PIN       PB0
+#define DEVICE_PIN     PB1
+#define STATUS_LED_PIN PC13
 
-// ---------- Motor / Input pins ----------
-#define MOTOR_PIN   25
-#define LOAD_PIN    34
-#define DEVICE_PIN  35
-
-// ---------- Signal polarity ----------
-#define LOAD_ACTIVE_LOW          0
-#define DEVICE_READY_ACTIVE_LOW  1
-
+#define STATUS_LED_ACTIVE_LOW 1
 #define POLL_INTERVAL_MS 5000UL
+#define FAILSAFE_TIMEOUT_MS 20000UL
+#define HTTP_WAIT_TIMEOUT_MS 15000UL
 
-const char apn[]      = "internet"; // update for your SIM operator APN
+const char apn[]      = "internet";
 const char gprsUser[] = "";
 const char gprsPass[] = "";
 
-// ---------- Admin-based config ----------
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
 const char* SERVER   = "pms.mechatronicslab.net";
 const int   PORT     = 80;
@@ -609,21 +1128,24 @@ const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
 
 TinyGsm modem(SerialAT);
 TinyGsmClient client(modem);
-
 unsigned long lastPoll = 0;
+unsigned long lastSuccess = 0;
+
+void writeStatusLed(bool on) {
+  digitalWrite(STATUS_LED_PIN, STATUS_LED_ACTIVE_LOW ? (on ? LOW : HIGH) : (on ? HIGH : LOW));
+}
 
 bool readLoadShedding() {
-  int raw = digitalRead(LOAD_PIN);
-  return LOAD_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+  return digitalRead(LOAD_PIN) == HIGH;
 }
 
 bool readDeviceReady() {
-  int raw = digitalRead(DEVICE_PIN);
-  return DEVICE_READY_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+  return digitalRead(DEVICE_PIN) == HIGH;
 }
 
 void setMotor(bool on) {
   digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
+  writeStatusLed(on);
   SerialMon.printf("[MOTOR] %s\\n", on ? "ON" : "OFF");
 }
 
@@ -646,11 +1168,12 @@ bool connectGprsIfNeeded() {
   return true;
 }
 
-bool readHttpResponseBody(String& bodyOut) {
-  unsigned long t = millis();
+bool readHttpJson(String& bodyOut) {
+  unsigned long start = millis();
   while (client.connected() && !client.available()) {
-    if (millis() - t > 15000UL) {
-      SerialMon.println("[HTTP] Timeout waiting response");
+    if (millis() - start > HTTP_WAIT_TIMEOUT_MS) {
+      SerialMon.println("[HTTP] Timeout");
+      client.stop();
       return false;
     }
     delay(10);
@@ -668,208 +1191,6 @@ bool readHttpResponseBody(String& bodyOut) {
   if (codeStart >= 0) {
     statusCode = response.substring(codeStart + 9, codeStart + 12).toInt();
   }
-
-  if (statusCode != 200) {
-    SerialMon.printf("[HTTP] Non-200: %d\\n", statusCode);
-    return false;
-  }
-
-  int jsonStart = response.indexOf('{');
-  if (jsonStart < 0) {
-    SerialMon.println("[HTTP] JSON not found");
-    return false;
-  }
-
-  bodyOut = response.substring(jsonStart);
-  return true;
-}
-
-void pollServer() {
-  if (!connectGprsIfNeeded()) return;
-
-  bool localLS = readLoadShedding();
-  bool localDev = readDeviceReady();
-
-  String path = "/api/esp32/poll/?adminId=" + String(ADMIN_ID) +
-                "&ls=" + String(localLS ? "1" : "0") +
-                "&dev=" + String(localDev ? "1" : "0");
-
-  SerialMon.printf("[HTTP] GET %s\\n", path.c_str());
-
-  if (!client.connect(SERVER, PORT)) {
-    SerialMon.println("[HTTP] Connect failed");
-    return;
-  }
-
-  client.print(String("GET ") + path + " HTTP/1.1\\r\\n");
-  client.print(String("Host: ") + SERVER + "\\r\\n");
-  client.print(String("x-device-key: ") + DEVICE_KEY + "\\r\\n");
-  client.print("Connection: close\\r\\n\\r\\n");
-
-  String body;
-  if (!readHttpResponseBody(body)) return;
-
-  StaticJsonDocument<768> doc;
-  DeserializationError err = deserializeJson(doc, body);
-  if (err) {
-    SerialMon.printf("[JSON] Parse error: %s\\n", err.c_str());
-    return;
-  }
-
-  const char* motorStatus = doc["motorStatus"] | "OFF";
-  bool backendLS = doc["loadShedding"] | false;
-  bool backendDev = doc["deviceReady"] | false;
-  const char* adminName = doc["adminName"] | "unknown";
-
-  SerialMon.printf("[POLL] admin=%s status=%s ls=%d localLS=%d dev=%d backendDev=%d\\n",
-                   adminName, motorStatus, backendLS, localLS, localDev, backendDev);
-
-  bool turnOn = (strcmp(motorStatus, "RUNNING") == 0) &&
-                !backendLS &&
-                !localLS &&
-                localDev &&
-                backendDev;
-
-  setMotor(turnOn);
-}
-
-void powerOnModem() {
-  pinMode(MODEM_POWER_ON, OUTPUT);
-  pinMode(MODEM_PWRKEY, OUTPUT);
-  pinMode(MODEM_RST, OUTPUT);
-
-  digitalWrite(MODEM_POWER_ON, HIGH);
-  digitalWrite(MODEM_RST, HIGH);
-
-  digitalWrite(MODEM_PWRKEY, LOW);
-  delay(1000);
-  digitalWrite(MODEM_PWRKEY, HIGH);
-  delay(2000);
-  digitalWrite(MODEM_PWRKEY, LOW);
-}
-
-void setup() {
-  SerialMon.begin(115200);
-  delay(300);
-
-  pinMode(MOTOR_PIN, OUTPUT);
-  digitalWrite(MOTOR_PIN, LOW);
-  pinMode(LOAD_PIN, INPUT_PULLUP);
-  pinMode(DEVICE_PIN, INPUT_PULLUP);
-
-  powerOnModem();
-
-  SerialAT.begin(9600, SERIAL_8N1, MODEM_RX, MODEM_TX);
-  delay(3000);
-
-  SerialMon.println("[MODEM] Restarting...");
-  modem.restart();
-  connectGprsIfNeeded();
-}
-
-void loop() {
-  unsigned long now = millis();
-  if (now - lastPoll >= POLL_INTERVAL_MS) {
-    lastPoll = now;
-    pollServer();
-  }
-  delay(20);
-}`;
-
-  const stm32Sim800lCode = `#define TINY_GSM_MODEM_SIM800
-#define TINY_GSM_RX_BUFFER 1024
-
-#include <TinyGsmClient.h>
-#include <ArduinoJson.h>
-
-// =========================
-// PumpPilot STM32 + SIM800L
-// (STM32 Arduino Core)
-// =========================
-
-// ---------- Serial ----------
-#define SerialMon Serial
-#define SerialAT  Serial1   // map TX/RX in your STM32 variant
-
-// ---------- Motor / Input pins ----------
-#define MOTOR_PIN   PA8
-#define LOAD_PIN    PB0
-#define DEVICE_PIN  PB1
-
-// ---------- Signal polarity ----------
-#define LOAD_ACTIVE_LOW          0
-#define DEVICE_READY_ACTIVE_LOW  1
-
-// ---------- Timing ----------
-#define POLL_INTERVAL_MS 5000UL
-
-// ---------- GSM ----------
-const char apn[]      = "internet"; // update APN
-const char gprsUser[] = "";
-const char gprsPass[] = "";
-
-// ---------- Admin-based config ----------
-const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
-const char* SERVER   = "pms-two-kappa.vercel.app";
-const int   PORT     = 80;
-const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
-
-TinyGsm modem(SerialAT);
-TinyGsmClient client(modem);
-unsigned long lastPoll = 0;
-
-bool readLoadShedding() {
-  int raw = digitalRead(LOAD_PIN);
-  return LOAD_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
-}
-
-bool readDeviceReady() {
-  int raw = digitalRead(DEVICE_PIN);
-  return DEVICE_READY_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
-}
-
-void setMotor(bool on) {
-  digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
-  SerialMon.printf("[MOTOR] %s\\n", on ? "ON" : "OFF");
-}
-
-bool connectGprsIfNeeded() {
-  if (modem.isGprsConnected()) return true;
-
-  SerialMon.println("[NET] Waiting network...");
-  if (!modem.waitForNetwork(60000L)) {
-    SerialMon.println("[NET] Network failed");
-    return false;
-  }
-
-  SerialMon.println("[NET] Connecting GPRS...");
-  if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
-    SerialMon.println("[NET] GPRS failed");
-    return false;
-  }
-
-  SerialMon.println("[NET] GPRS connected");
-  return true;
-}
-
-bool readHttpJson(String& bodyOut) {
-  unsigned long t = millis();
-  while (client.connected() && !client.available()) {
-    if (millis() - t > 15000UL) {
-      SerialMon.println("[HTTP] Timeout");
-      return false;
-    }
-    delay(10);
-  }
-
-  String response;
-  while (client.available()) response += client.readString();
-  client.stop();
-
-  int codeStart = response.indexOf("HTTP/1.1 ");
-  if (codeStart < 0) codeStart = response.indexOf("HTTP/1.0 ");
-  int statusCode = -1;
-  if (codeStart >= 0) statusCode = response.substring(codeStart + 9, codeStart + 12).toInt();
   if (statusCode != 200) {
     SerialMon.printf("[HTTP] Non-200: %d\\n", statusCode);
     return false;
@@ -880,6 +1201,7 @@ bool readHttpJson(String& bodyOut) {
     SerialMon.println("[HTTP] JSON missing");
     return false;
   }
+
   bodyOut = response.substring(jsonStart);
   return true;
 }
@@ -890,7 +1212,7 @@ void pollServer() {
   bool localLS = readLoadShedding();
   bool localDev = readDeviceReady();
 
-  String path = "/api/esp32/poll/?adminId=" + String(ADMIN_ID) +
+  String path = "/api/esp32/poll?adminId=" + String(ADMIN_ID) +
                 "&ls=" + (localLS ? "1" : "0") +
                 "&dev=" + (localDev ? "1" : "0");
 
@@ -917,17 +1239,24 @@ void pollServer() {
   const char* motorStatus = doc["motorStatus"] | "OFF";
   bool backendLS = doc["loadShedding"] | false;
   bool backendDev = doc["deviceReady"] | false;
-  const char* adminName = doc["adminName"] | "unknown";
-
-  SerialMon.printf("[POLL] admin=%s status=%s ls=%d localLS=%d dev=%d backendDev=%d\\n",
-                   adminName, motorStatus, backendLS, localLS, localDev, backendDev);
 
   bool turnOn = (strcmp(motorStatus, "RUNNING") == 0) &&
                 !backendLS &&
                 !localLS &&
                 localDev &&
                 backendDev;
+
   setMotor(turnOn);
+  lastSuccess = millis();
+
+  SerialMon.printf("[POLL] status=%s ls=%d localLS=%d dev=%d backendDev=%d\\n",
+                   motorStatus, backendLS, localLS, localDev, backendDev);
+}
+
+void failSafe() {
+  if (millis() - lastSuccess > FAILSAFE_TIMEOUT_MS) {
+    setMotor(false);
+  }
 }
 
 void setup() {
@@ -935,11 +1264,13 @@ void setup() {
   delay(300);
 
   pinMode(MOTOR_PIN, OUTPUT);
-  digitalWrite(MOTOR_PIN, LOW);
   pinMode(LOAD_PIN, INPUT_PULLUP);
   pinMode(DEVICE_PIN, INPUT_PULLUP);
+  pinMode(STATUS_LED_PIN, OUTPUT);
 
-  // set your modem baud / serial mapping as per STM32 board
+  digitalWrite(MOTOR_PIN, LOW);
+  writeStatusLed(false);
+
   SerialAT.begin(9600);
   delay(2000);
 
@@ -954,6 +1285,8 @@ void loop() {
     lastPoll = now;
     pollServer();
   }
+
+  failSafe();
   delay(20);
 }`;
 
