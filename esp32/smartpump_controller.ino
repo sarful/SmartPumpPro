@@ -3,6 +3,8 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 #include <SPI.h>
 #include <MFRC522.h>
 
@@ -33,6 +35,13 @@ Load LED         -> GPIO17
 Device LED       -> GPIO4
 Internet OK LED  -> GPIO2
 Internet FAIL    -> GPIO15
+
+LCD 16x2 (I2C)
+--------------
+SDA -> GPIO21
+SCL -> GPIO22
+VCC -> 5V
+GND -> GND
 
 INPUT SIGNALS
 -------------
@@ -71,7 +80,10 @@ Motor Relay      -> GPIO25
 // CONFIG
 // =========================
 #define POLL_INTERVAL 5000UL
-#define FAIL_TIMEOUT  20000UL
+#define FAIL_TIMEOUT  15000UL
+#define RFID_DEBOUNCE_MS 3000UL
+#define LOAD_ACTIVE_LOW 0
+#define DEVICE_READY_ACTIVE_LOW 0
 
 const char* API_URL = "https://pms.mechatronicslab.net/api/esp32/poll";
 const char* ADMIN_ID = "PUT_ADMIN_ID_HERE";
@@ -80,9 +92,11 @@ const char* DEVICE_KEY = "PUT_YOUR_ESP32_DEVICE_SECRET_HERE";
 // =========================
 // GLOBAL
 // =========================
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
 
 unsigned long lastPoll = 0;
+unsigned long lastRFID = 0;
 unsigned long lastSuccess = 0;
 
 // =========================
@@ -94,11 +108,21 @@ void setMotor(bool on) {
 }
 
 bool readLoad() {
-  return digitalRead(LOAD_PIN) == HIGH;
+  int raw = digitalRead(LOAD_PIN);
+  return LOAD_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
 }
 
 bool readDevice() {
-  return digitalRead(DEVICE_PIN) == HIGH;
+  int raw = digitalRead(DEVICE_PIN);
+  return DEVICE_READY_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+}
+
+void lcdMessage(const String& line1, const String& line2 = "") {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(line1.substring(0, 16));
+  lcd.setCursor(0, 1);
+  lcd.print(line2.substring(0, 16));
 }
 
 void updateNetLED() {
@@ -132,7 +156,7 @@ String readRFID() {
   return uid;
 }
 
-void pollServer() {
+void pollServer(const String& uid = "") {
   if (WiFi.status() != WL_CONNECTED) return;
 
   bool ls = readLoad();
@@ -145,6 +169,9 @@ void pollServer() {
                "?adminId=" + ADMIN_ID +
                "&ls=" + (ls ? "1" : "0") +
                "&dev=" + (dev ? "1" : "0");
+  if (uid.length()) {
+    url += "&uid=" + uid;
+  }
 
   WiFiClientSecure client;
   client.setInsecure();
@@ -164,15 +191,35 @@ void pollServer() {
     if (!deserializeJson(doc, payload)) {
       const char* status = doc["motorStatus"] | "OFF";
       bool backendLS = doc["loadShedding"] | false;
+      bool backendDev = doc["deviceReady"] | false;
+      const char* cardMessage = doc["cardModeMessage"] | "";
 
       bool turnOn =
         (strcmp(status, "RUNNING") == 0) &&
         !backendLS &&
         !ls &&
-        dev;
+        dev &&
+        backendDev;
 
       setMotor(turnOn);
       lastSuccess = millis();
+
+      lcd.setCursor(0, 0);
+      lcd.print("M:");
+      lcd.print(turnOn ? "ON " : "OFF");
+      lcd.print(" L:");
+      lcd.print(ls ? "Y" : "N");
+      lcd.print(" D:");
+      lcd.print(dev ? "Y" : "N");
+
+      lcd.setCursor(0, 1);
+      if (uid.length()) {
+        lcd.print(String(cardMessage).substring(0, 16));
+      } else {
+        lcd.print(modem.isGprsConnected() ? "NET OK " : "NET FAIL");
+        lcd.print(" ");
+        lcd.print(backendLS ? "LS" : "OK");
+      }
     }
   }
 
@@ -192,14 +239,19 @@ void setup() {
   Serial.begin(115200);
 
   pinMode(MOTOR_PIN, OUTPUT);
-  pinMode(LOAD_PIN, INPUT);
-  pinMode(DEVICE_PIN, INPUT);
+  pinMode(LOAD_PIN, INPUT_PULLUP);
+  pinMode(DEVICE_PIN, INPUT_PULLUP);
 
   pinMode(LED_MOTOR, OUTPUT);
   pinMode(LED_LOAD, OUTPUT);
   pinMode(LED_DEVICE, OUTPUT);
   pinMode(LED_NET_OK, OUTPUT);
   pinMode(LED_NET_FAIL, OUTPUT);
+
+  Wire.begin(21, 22);
+  lcd.init();
+  lcd.backlight();
+  lcdMessage("PumpPilot", "Booting...");
 
   digitalWrite(MOTOR_PIN, LOW);
   digitalWrite(LED_MOTOR, LOW);
@@ -212,6 +264,7 @@ void setup() {
   wm.autoConnect("ESP32-Setup");
 
   Serial.println("WiFi Connected");
+  lcdMessage("WiFi Connected");
 
   SPI.begin(RFID_SCK_PIN, RFID_MISO_PIN, RFID_MOSI_PIN, RFID_SS_PIN);
   rfid.PCD_Init();
@@ -224,8 +277,11 @@ void loop() {
   updateNetLED();
 
   String uid = readRFID();
-  if (uid.length()) {
+  if (uid.length() && millis() - lastRFID > RFID_DEBOUNCE_MS) {
+    lastRFID = millis();
     Serial.println("RFID: " + uid);
+    lcdMessage("RFID", uid.substring(0, 16));
+    pollServer(uid);
   }
 
   if (millis() - lastPoll > POLL_INTERVAL) {

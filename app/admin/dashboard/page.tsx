@@ -105,6 +105,13 @@ Device LED       -> GPIO4
 Internet OK LED  -> GPIO2
 Internet FAIL    -> GPIO15
 
+LCD 16x2 (I2C)
+--------------
+SDA -> GPIO21
+SCL -> GPIO22
+VCC -> 5V
+GND -> GND
+
 INPUT SIGNALS
 -------------
 Load Pin         -> GPIO32
@@ -122,6 +129,8 @@ Motor Relay      -> GPIO25
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 #include <SPI.h>
 #include <MFRC522.h>
 
@@ -150,7 +159,10 @@ Motor Relay      -> GPIO25
 // CONFIG
 // =========================
 #define POLL_INTERVAL 5000UL
-#define FAIL_TIMEOUT  20000UL
+#define FAIL_TIMEOUT  15000UL
+#define RFID_DEBOUNCE_MS 3000UL
+#define LOAD_ACTIVE_LOW 0
+#define DEVICE_READY_ACTIVE_LOW 0
 
 const char* API_URL = "https://pms.mechatronicslab.net/api/esp32/poll";
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
@@ -159,9 +171,11 @@ const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
 // =========================
 // GLOBAL
 // =========================
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
 
 unsigned long lastPoll = 0;
+unsigned long lastRFID = 0;
 unsigned long lastSuccess = 0;
 
 // =========================
@@ -173,11 +187,21 @@ void setMotor(bool on) {
 }
 
 bool readLoad() {
-  return digitalRead(LOAD_PIN) == HIGH;
+  int raw = digitalRead(LOAD_PIN);
+  return LOAD_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
 }
 
 bool readDevice() {
-  return digitalRead(DEVICE_PIN) == HIGH;
+  int raw = digitalRead(DEVICE_PIN);
+  return DEVICE_READY_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+}
+
+void lcdMessage(const String& line1, const String& line2 = "") {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(line1.substring(0, 16));
+  lcd.setCursor(0, 1);
+  lcd.print(line2.substring(0, 16));
 }
 
 void updateNetLED() {
@@ -211,7 +235,7 @@ String readRFID() {
   return uid;
 }
 
-void pollServer() {
+void pollServer(const String& uid = "") {
   if (WiFi.status() != WL_CONNECTED) return;
 
   bool ls = readLoad();
@@ -224,6 +248,9 @@ void pollServer() {
                "?adminId=" + ADMIN_ID +
                "&ls=" + (ls ? "1" : "0") +
                "&dev=" + (dev ? "1" : "0");
+  if (uid.length()) {
+    url += "&uid=" + uid;
+  }
 
   WiFiClientSecure client;
   client.setInsecure();
@@ -243,15 +270,35 @@ void pollServer() {
     if (!deserializeJson(doc, payload)) {
       const char* status = doc["motorStatus"] | "OFF";
       bool backendLS = doc["loadShedding"] | false;
+      bool backendDev = doc["deviceReady"] | false;
+      const char* cardMessage = doc["cardModeMessage"] | "";
 
       bool turnOn =
         (strcmp(status, "RUNNING") == 0) &&
         !backendLS &&
         !ls &&
-        dev;
+        dev &&
+        backendDev;
 
       setMotor(turnOn);
       lastSuccess = millis();
+
+      lcd.setCursor(0, 0);
+      lcd.print("M:");
+      lcd.print(turnOn ? "ON " : "OFF");
+      lcd.print(" L:");
+      lcd.print(ls ? "Y" : "N");
+      lcd.print(" D:");
+      lcd.print(dev ? "Y" : "N");
+
+      lcd.setCursor(0, 1);
+      if (uid.length()) {
+        lcd.print(String(cardMessage).substring(0, 16));
+      } else {
+        lcd.print(WiFi.status() == WL_CONNECTED ? "NET OK " : "NET FAIL");
+        lcd.print(" ");
+        lcd.print(backendLS ? "LS" : "OK");
+      }
     }
   }
 
@@ -271,14 +318,19 @@ void setup() {
   Serial.begin(115200);
 
   pinMode(MOTOR_PIN, OUTPUT);
-  pinMode(LOAD_PIN, INPUT);
-  pinMode(DEVICE_PIN, INPUT);
+  pinMode(LOAD_PIN, INPUT_PULLUP);
+  pinMode(DEVICE_PIN, INPUT_PULLUP);
 
   pinMode(LED_MOTOR, OUTPUT);
   pinMode(LED_LOAD, OUTPUT);
   pinMode(LED_DEVICE, OUTPUT);
   pinMode(LED_NET_OK, OUTPUT);
   pinMode(LED_NET_FAIL, OUTPUT);
+
+  Wire.begin(21, 22);
+  lcd.init();
+  lcd.backlight();
+  lcdMessage("PumpPilot", "Booting...");
 
   digitalWrite(MOTOR_PIN, LOW);
   digitalWrite(LED_MOTOR, LOW);
@@ -291,6 +343,7 @@ void setup() {
   wm.autoConnect("ESP32-Setup");
 
   Serial.println("WiFi Connected");
+  lcdMessage("WiFi Connected");
 
   SPI.begin(RFID_SCK_PIN, RFID_MISO_PIN, RFID_MOSI_PIN, RFID_SS_PIN);
   rfid.PCD_Init();
@@ -303,8 +356,11 @@ void loop() {
   updateNetLED();
 
   String uid = readRFID();
-  if (uid.length()) {
+  if (uid.length() && millis() - lastRFID > RFID_DEBOUNCE_MS) {
+    lastRFID = millis();
     Serial.println("RFID: " + uid);
+    lcdMessage("RFID", uid.substring(0, 16));
+    pollServer(uid);
   }
 
   if (millis() - lastPoll > POLL_INTERVAL) {
@@ -764,119 +820,128 @@ void loop() {
 }`;
 
   const ttgoTCallCode = `#define TINY_GSM_MODEM_SIM800
+
 /*
 ===========================================================
-HARDWARE WIRING TABLE (TTGO T-CALL + RFID + LED + MOTOR)
+HARDWARE WIRING TABLE (TTGO T-CALL + LCD + RFID + SAFE PINS)
 ===========================================================
 
-TTGO T-CALL (SIM800L built-in)
-------------------------------
-MODEM_TX        -> GPIO27
-MODEM_RX        -> GPIO26
-MODEM_POWER_ON  -> GPIO23
-MODEM_RST       -> GPIO5
-MODEM_PWKEY     -> GPIO4
+MODEM (AUTO CONNECTED)
+----------------------
+GPIO27 -> TX
+GPIO26 -> RX
+GPIO23 -> POWER
+GPIO5  -> RESET
+GPIO4  -> PWKEY
 
-DO NOT USE ABOVE PINS FOR OTHER PURPOSE
+DO NOT USE ABOVE PINS
 
-RC522 (SPI)
------------
-RC522 SDA (SS)  -> GPIO15
-RC522 SCK       -> GPIO18
-RC522 MOSI      -> GPIO23 (shared SPI, safe)
-RC522 MISO      -> GPIO19
-RC522 RST       -> GPIO13
-RC522 VCC       -> 3.3V
-RC522 GND       -> GND
-
-LED CONNECTION
+LCD 16x2 (I2C)
 --------------
-Motor LED        -> GPIO16
-Load LED         -> GPIO17
-Device LED       -> GPIO14
-Internet OK LED  -> GPIO2
-Internet FAIL LED-> GPIO12
+SDA -> GPIO21
+SCL -> GPIO22
+VCC -> 5V
+GND -> GND
 
-INPUT SIGNALS
--------------
-Load Pin         -> GPIO32 (INPUT_PULLUP)
-Device Ready Pin -> GPIO33 (INPUT_PULLUP)
+RFID RC522 (SPI)
+----------------
+SDA  -> GPIO15
+SCK  -> GPIO18
+MOSI -> GPIO14
+MISO -> GPIO19
+RST  -> GPIO13
+VCC  -> 3.3V
+
+SAFE LED MAP
+------------
+Motor LED      -> GPIO16
+Load LED       -> GPIO17
+Device LED     -> LCD only
+NET OK LED     -> LCD only
+NET FAIL LED   -> LCD only
+
+INPUT
+-----
+LOAD   -> GPIO32
+DEVICE -> GPIO33
 
 OUTPUT
 ------
-Motor Relay      -> GPIO25
+MOTOR -> GPIO25
+
+NOTES
+-----
+- GPIO23 stays reserved for SIM800 power control
+- RFID MOSI moved to GPIO14 to avoid the modem conflict
+- Device and network status are shown on the LCD instead of risky extra LED pins
+===========================================================
 */
 
 #include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 #include <HardwareSerial.h>
 #include <TinyGsmClient.h>
 #include <ArduinoJson.h>
 #include <SPI.h>
 #include <MFRC522.h>
 
-// =========================
-// MODEM (DO NOT TOUCH)
-// =========================
-#define MODEM_RST        5
-#define MODEM_PWKEY      4
-#define MODEM_POWER_ON   23
-#define MODEM_TX         27
-#define MODEM_RX         26
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-// =========================
-// USER PINS (SAFE)
-// =========================
-#define MOTOR_PIN        25
-#define LOAD_PIN         32
-#define DEVICE_PIN       33
+#define MODEM_RST 5
+#define MODEM_PWKEY 4
+#define MODEM_POWER_ON 23
+#define MODEM_TX 27
+#define MODEM_RX 26
 
-// =========================
-// RFID (SPI)
-// =========================
-#define RFID_SS_PIN      15
-#define RFID_RST_PIN     13
-#define RFID_SCK_PIN     18
-#define RFID_MISO_PIN    19
-#define RFID_MOSI_PIN    23
+#define MOTOR_PIN 25
+#define LOAD_PIN 32
+#define DEVICE_PIN 33
 
-// =========================
-// LED PINS
-// =========================
-#define LED_MOTOR        16
-#define LED_LOAD         17
-#define LED_DEVICE       14
-#define LED_NET_OK       2
-#define LED_NET_FAIL     12
+#define RFID_SS 15
+#define RFID_RST 13
+#define RFID_SCK 18
+#define RFID_MISO 19
+#define RFID_MOSI 14
 
-// =========================
-// CONFIG
-// =========================
-#define POLL_INTERVAL_MS     5000
-#define RFID_DEBOUNCE_MS     3000
-#define FAILSAFE_TIMEOUT_MS  20000
+#define LED_MOTOR 16
+#define LED_LOAD 17
+#define LED_DEVICE -1
+#define LED_NET_OK -1
+#define LED_NET_FAIL -1
+
+#define POLL_INTERVAL_MS 5000UL
+#define RFID_DEBOUNCE_MS 3000UL
+#define FAILSAFE_TIMEOUT_MS 15000UL
+#define LOAD_ACTIVE_LOW 0
+#define DEVICE_READY_ACTIVE_LOW 0
 
 const char APN[] = "internet";
-const char* API_HOST = "pms.mechatronicslab.net";
-const int API_PORT = 80;
-
+const char* API_URL = "https://pms.mechatronicslab.net/api/esp32/poll";
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
 const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
 
-// =========================
-// GLOBALS
-// =========================
 HardwareSerial SerialAT(1);
 TinyGsm modem(SerialAT);
 TinyGsmClient client(modem);
-MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
+MFRC522 rfid(RFID_SS, RFID_RST);
 
 unsigned long lastPoll = 0;
 unsigned long lastRFID = 0;
 unsigned long lastSuccess = 0;
 
-// =========================
-// MODEM POWER
-// =========================
+void lcdMessage(const String& line1, const String& line2 = "") {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(line1.substring(0, 16));
+  lcd.setCursor(0, 1);
+  lcd.print(line2.substring(0, 16));
+}
+
+void writeOptionalPin(int pin, bool on) {
+  if (pin < 0) return;
+  digitalWrite(pin, on ? HIGH : LOW);
+}
+
 void setupModem() {
   pinMode(MODEM_POWER_ON, OUTPUT);
   pinMode(MODEM_PWKEY, OUTPUT);
@@ -884,52 +949,66 @@ void setupModem() {
 
   digitalWrite(MODEM_POWER_ON, HIGH);
   delay(100);
-
   digitalWrite(MODEM_PWKEY, HIGH);
   delay(1000);
   digitalWrite(MODEM_PWKEY, LOW);
 }
 
-// =========================
-// GSM CONNECT
-// =========================
 bool connectGSM() {
+  lcdMessage("Connecting GSM", "Please wait");
+
   modem.restart();
-  if (!modem.waitForNetwork(60000L)) return false;
-  if (!modem.gprsConnect(APN, "", "")) return false;
+  if (!modem.waitForNetwork(60000L)) {
+    lcdMessage("GSM Network", "Failed");
+    return false;
+  }
+  if (!modem.gprsConnect(APN, "", "")) {
+    lcdMessage("GPRS", "Failed");
+    return false;
+  }
+
+  lcdMessage("GSM Connected");
+  delay(800);
   return true;
 }
 
-// =========================
-// IO
-// =========================
-bool readLoad() { return digitalRead(LOAD_PIN); }
-bool readDevice() { return digitalRead(DEVICE_PIN); }
-
 void setMotor(bool on) {
-  digitalWrite(MOTOR_PIN, on);
-  digitalWrite(LED_MOTOR, on);
+  digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
+  writeOptionalPin(LED_MOTOR, on);
 }
 
-// =========================
-// HTTP
-// =========================
-String httpGET(String path, int &code) {
+String httpGET(const String& url, int& code) {
   code = -1;
 
-  if (!client.connect(API_HOST, API_PORT)) return "";
+  String host = "pms.mechatronicslab.net";
+  String path = url;
+  int protocolIndex = path.indexOf("://");
+  if (protocolIndex >= 0) {
+    int hostStart = protocolIndex + 3;
+    int pathStart = path.indexOf('/', hostStart);
+    if (pathStart > hostStart) {
+      host = path.substring(hostStart, pathStart);
+      path = path.substring(pathStart);
+    }
+  }
+
+  if (!client.connect(host.c_str(), 80)) {
+    return "";
+  }
 
   client.print(String("GET ") + path + " HTTP/1.1\\r\\n");
-  client.print(String("Host: ") + API_HOST + "\\r\\n");
+  client.print(String("Host: ") + host + "\\r\\n");
   client.print(String("x-device-key: ") + DEVICE_KEY + "\\r\\n");
   client.print("Connection: close\\r\\n\\r\\n");
 
-  unsigned long t = millis();
-  while (!client.available() && millis() - t < 10000) delay(10);
+  unsigned long start = millis();
+  while (!client.available() && millis() - start < 10000UL) {
+    delay(10);
+  }
 
   String statusLine = client.readStringUntil('\\n');
-  int s = statusLine.indexOf(' ');
-  code = statusLine.substring(s + 1).toInt();
+  int firstSpace = statusLine.indexOf(' ');
+  code = statusLine.substring(firstSpace + 1).toInt();
 
   while (client.connected()) {
     String line = client.readStringUntil('\\n');
@@ -941,9 +1020,6 @@ String httpGET(String path, int &code) {
   return body;
 }
 
-// =========================
-// RFID
-// =========================
 String readRFID() {
   if (!rfid.PICC_IsNewCardPresent()) return "";
   if (!rfid.PICC_ReadCardSerial()) return "";
@@ -955,26 +1031,54 @@ String readRFID() {
 
   uid.toUpperCase();
   rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
   return uid;
 }
 
-// =========================
-// POLL SERVER
-// =========================
-void pollServer() {
-  bool ls = readLoad();
-  bool dev = readDevice();
+void sendRFID(const String& uid) {
+  bool ls = LOAD_ACTIVE_LOW ? (digitalRead(LOAD_PIN) == LOW) : (digitalRead(LOAD_PIN) == HIGH);
+  bool dev = DEVICE_READY_ACTIVE_LOW ? (digitalRead(DEVICE_PIN) == LOW) : (digitalRead(DEVICE_PIN) == HIGH);
 
-  digitalWrite(LED_LOAD, ls);
-  digitalWrite(LED_DEVICE, dev);
-
-  String path = "/api/esp32/poll?adminId=" + String(ADMIN_ID) +
-                "&ls=" + (ls ? "1" : "0") +
-                "&dev=" + (dev ? "1" : "0");
+  String url = String(API_URL) +
+               "?adminId=" + String(ADMIN_ID) +
+               "&ls=" + (ls ? "1" : "0") +
+               "&dev=" + (dev ? "1" : "0") +
+               "&uid=" + uid;
 
   int code;
-  String body = httpGET(path, code);
+  String body = httpGET(url, code);
 
+  lcdMessage("RFID:", uid.substring(0, 8));
+
+  if (code != 200) {
+    lcdMessage("RFID Send Fail", String(code));
+    return;
+  }
+
+  StaticJsonDocument<512> doc;
+  if (deserializeJson(doc, body)) {
+    lcdMessage("RFID Parse", "Failed");
+    return;
+  }
+
+  const char* message = doc["cardModeMessage"] | "RFID done";
+  lcdMessage("RFID Result", String(message));
+}
+
+void pollServer() {
+  bool ls = LOAD_ACTIVE_LOW ? (digitalRead(LOAD_PIN) == LOW) : (digitalRead(LOAD_PIN) == HIGH);
+  bool dev = DEVICE_READY_ACTIVE_LOW ? (digitalRead(DEVICE_PIN) == LOW) : (digitalRead(DEVICE_PIN) == HIGH);
+
+  writeOptionalPin(LED_LOAD, ls);
+  writeOptionalPin(LED_DEVICE, dev);
+
+  String url = String(API_URL) +
+               "?adminId=" + String(ADMIN_ID) +
+               "&ls=" + (ls ? "1" : "0") +
+               "&dev=" + (dev ? "1" : "0");
+
+  int code;
+  String body = httpGET(url, code);
   if (code != 200) return;
 
   StaticJsonDocument<512> doc;
@@ -982,49 +1086,53 @@ void pollServer() {
 
   const char* status = doc["motorStatus"] | "OFF";
   bool backendLS = doc["loadShedding"] | false;
+  bool backendDev = doc["deviceReady"] | false;
 
   bool turnOn =
-      (strcmp(status, "RUNNING") == 0) &&
-      !backendLS &&
-      !ls &&
-      dev;
+    (strcmp(status, "RUNNING") == 0) &&
+    !backendLS &&
+    !ls &&
+    dev &&
+    backendDev;
 
   setMotor(turnOn);
   lastSuccess = millis();
+
+  lcd.setCursor(0, 0);
+  lcd.print("Motor:");
+  lcd.print(turnOn ? "ON " : "OFF");
+  lcd.print(" LS:");
+  lcd.print(ls ? "Y" : "N");
+
+  lcd.setCursor(0, 1);
+  lcd.print("Dev:");
+  lcd.print(dev ? "OK" : "NO");
+  lcd.print(" Net:");
+  lcd.print(modem.isGprsConnected() ? "OK" : "NO");
 }
 
-// =========================
-// FAILSAFE
-// =========================
 void failSafe() {
   if (millis() - lastSuccess > FAILSAFE_TIMEOUT_MS) {
     setMotor(false);
   }
 }
 
-// =========================
-// NET LED
-// =========================
 void updateNetLED() {
   if (modem.isGprsConnected()) {
-    digitalWrite(LED_NET_OK, HIGH);
-    digitalWrite(LED_NET_FAIL, LOW);
+    writeOptionalPin(LED_NET_OK, true);
+    writeOptionalPin(LED_NET_FAIL, false);
   } else {
-    digitalWrite(LED_NET_OK, LOW);
+    writeOptionalPin(LED_NET_OK, false);
     static bool state = false;
-    static unsigned long last = 0;
-
-    if (millis() - last > 500) {
-      last = millis();
+    static unsigned long lastBlink = 0;
+    if (millis() - lastBlink > 500) {
+      lastBlink = millis();
       state = !state;
-      digitalWrite(LED_NET_FAIL, state);
+      writeOptionalPin(LED_NET_FAIL, state);
     }
   }
 }
 
-// =========================
-// SETUP
-// =========================
 void setup() {
   Serial.begin(115200);
 
@@ -1034,23 +1142,24 @@ void setup() {
 
   pinMode(LED_MOTOR, OUTPUT);
   pinMode(LED_LOAD, OUTPUT);
-  pinMode(LED_DEVICE, OUTPUT);
-  pinMode(LED_NET_OK, OUTPUT);
-  pinMode(LED_NET_FAIL, OUTPUT);
+  if (LED_DEVICE >= 0) pinMode(LED_DEVICE, OUTPUT);
+  if (LED_NET_OK >= 0) pinMode(LED_NET_OK, OUTPUT);
+  if (LED_NET_FAIL >= 0) pinMode(LED_NET_FAIL, OUTPUT);
+
+  Wire.begin(21, 22);
+  lcd.init();
+  lcd.backlight();
+  lcdMessage("PumpPilot", "Booting...");
 
   setupModem();
-
   SerialAT.begin(9600, SERIAL_8N1, MODEM_RX, MODEM_TX);
 
-  SPI.begin(RFID_SCK_PIN, RFID_MISO_PIN, RFID_MOSI_PIN, RFID_SS_PIN);
+  SPI.begin(RFID_SCK, RFID_MISO, RFID_MOSI, RFID_SS);
   rfid.PCD_Init();
 
   connectGSM();
 }
 
-// =========================
-// LOOP
-// =========================
 void loop() {
   if (!modem.isGprsConnected()) {
     connectGSM();
@@ -1061,7 +1170,7 @@ void loop() {
   String uid = readRFID();
   if (uid.length() && millis() - lastRFID > RFID_DEBOUNCE_MS) {
     lastRFID = millis();
-    // RFID event send optional
+    sendRFID(uid);
   }
 
   if (millis() - lastPoll > POLL_INTERVAL_MS) {

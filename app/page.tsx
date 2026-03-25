@@ -45,21 +45,17 @@ export default function Home() {
           </Link>
         </div>
 
-        <div className="mt-6 rounded-2xl border border-blue-200 bg-blue-50/70 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">
-            Help Center
-          </p>
-          {/* <p className="mt-1 text-sm text-blue-900">New card for beginner support and technical docs.</p> */}
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="mt-6 border-t border-slate-200 pt-4">
+          <div className="flex flex-wrap justify-center gap-2">
             <Link
               href="/guide"
-              className="rounded-xl border border-blue-300 bg-white px-4 py-3 text-sm font-medium text-blue-700 hover:bg-blue-100"
+              className="rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
             >
               Beginner Guide
             </Link>
             <Link
               href="/documentation"
-              className="rounded-xl border border-blue-300 bg-white px-4 py-3 text-sm font-medium text-blue-700 hover:bg-blue-100"
+              className="rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
             >
               Documentation
             </Link>
