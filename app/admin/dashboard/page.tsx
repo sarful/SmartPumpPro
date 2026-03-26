@@ -912,17 +912,19 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 #define POLL_INTERVAL_MS 5000UL
 #define RFID_DEBOUNCE_MS 3000UL
 #define FAILSAFE_TIMEOUT_MS 15000UL
-#define LOAD_ACTIVE_LOW 0
+#define LOAD_ACTIVE_LOW 1
 #define DEVICE_READY_ACTIVE_LOW 0
 
 const char APN[] = "internet";
-const char* API_URL = "https://pms.mechatronicslab.net/api/esp32/poll";
+const char* API_HOST = "pms.mechatronicslab.net";
+const int API_PORT = 443;
+const char* API_PATH = "/api/esp32/poll";
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
 const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
 
 HardwareSerial SerialAT(1);
 TinyGsm modem(SerialAT);
-TinyGsmClient client(modem);
+TinyGsmClientSecure client(modem);
 MFRC522 rfid(RFID_SS, RFID_RST);
 
 unsigned long lastPoll = 0;
@@ -980,24 +982,12 @@ void setMotor(bool on) {
 String httpGET(const String& url, int& code) {
   code = -1;
 
-  String host = "pms.mechatronicslab.net";
-  String path = url;
-  int protocolIndex = path.indexOf("://");
-  if (protocolIndex >= 0) {
-    int hostStart = protocolIndex + 3;
-    int pathStart = path.indexOf('/', hostStart);
-    if (pathStart > hostStart) {
-      host = path.substring(hostStart, pathStart);
-      path = path.substring(pathStart);
-    }
-  }
-
-  if (!client.connect(host.c_str(), 80)) {
+  if (!client.connect(API_HOST, API_PORT)) {
     return "";
   }
 
-  client.print(String("GET ") + path + " HTTP/1.1\\r\\n");
-  client.print(String("Host: ") + host + "\\r\\n");
+  client.print(String("GET ") + url + " HTTP/1.1\\r\\n");
+  client.print(String("Host: ") + API_HOST + "\\r\\n");
   client.print(String("x-device-key: ") + DEVICE_KEY + "\\r\\n");
   client.print("Connection: close\\r\\n\\r\\n");
 
@@ -1039,7 +1029,7 @@ void sendRFID(const String& uid) {
   bool ls = LOAD_ACTIVE_LOW ? (digitalRead(LOAD_PIN) == LOW) : (digitalRead(LOAD_PIN) == HIGH);
   bool dev = DEVICE_READY_ACTIVE_LOW ? (digitalRead(DEVICE_PIN) == LOW) : (digitalRead(DEVICE_PIN) == HIGH);
 
-  String url = String(API_URL) +
+  String url = String(API_PATH) +
                "?adminId=" + String(ADMIN_ID) +
                "&ls=" + (ls ? "1" : "0") +
                "&dev=" + (dev ? "1" : "0") +
@@ -1072,7 +1062,7 @@ void pollServer() {
   writeOptionalPin(LED_LOAD, ls);
   writeOptionalPin(LED_DEVICE, dev);
 
-  String url = String(API_URL) +
+  String url = String(API_PATH) +
                "?adminId=" + String(ADMIN_ID) +
                "&ls=" + (ls ? "1" : "0") +
                "&dev=" + (dev ? "1" : "0");
