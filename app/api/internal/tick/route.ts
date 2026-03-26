@@ -5,6 +5,8 @@ import { reportIncident } from '@/lib/observability';
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET?.trim();
   const header = req.headers.get('x-cron-key')?.trim();
+  const authorization = req.headers.get('authorization')?.trim();
+  const bearer = secret ? `Bearer ${secret}` : null;
 
   if (!secret) {
     return NextResponse.json(
@@ -16,7 +18,9 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  if (header !== secret) {
+  const authorized = header === secret || (bearer !== null && authorization === bearer);
+
+  if (!authorized) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
