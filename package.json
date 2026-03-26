@@ -3,15 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/env-check.js --mode=dev && next dev",
     "dev:nodemon": "nodemon",
-    "build": "next build",
-    "start": "next start",
+    "build": "node scripts/env-check.js --mode=build && next build",
+    "start": "node scripts/env-check.js --mode=start && next start",
     "lint": "eslint",
+    "test": "node --require ./tests/helpers/register.cjs ./tests/run-tests.cjs",
+    "typecheck": "tsc --noEmit",
+    "release:validate": "npm test && npm run typecheck && npm run lint -- . && npm run install:check && npm run build",
+    "auth:unlock": "node scripts/unlock-auth.js",
     "db:migrate": "node scripts/migrate.js",
     "db:seed": "node scripts/seed.js",
     "db:setup": "node scripts/setup.js",
-    "install:check": "node scripts/install-check.js",
+    "install:check": "node scripts/env-check.js --mode=build && node scripts/install-check.js",
     "package:codecanyon": "node scripts/prepare-codecanyon.js"
   },
   "dependencies": {

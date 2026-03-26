@@ -7,7 +7,7 @@ import { calculateUsedMinutes, stopMotorForUser } from "@/lib/timer-engine";
 
 export async function POST(req: NextRequest) {
   try {
-    const payload = getMobileAccessPayload(req);
+    const payload = await getMobileAccessPayload(req);
     if (!payload) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (payload.role !== "user") {
       return NextResponse.json({ error: "Only user role is allowed" }, { status: 403 });

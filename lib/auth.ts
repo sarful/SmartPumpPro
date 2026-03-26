@@ -1,6 +1,5 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { compare } from "bcryptjs";
 import { connectDB } from "@/lib/mongodb";
 import MasterAdmin from "@/models/MasterAdmin";
 import Admin from "@/models/Admin";
@@ -12,6 +11,7 @@ import {
   makeThrottleKey,
   registerFailedAuth,
 } from "@/lib/auth-security";
+import { verifyStoredPassword } from "@/lib/passwords";
 
 type AuthUser = {
   id: string;
@@ -46,22 +46,9 @@ const credentialsProvider = Credentials({
       return null;
     }
 
-    const verifyPassword = async (stored: string | undefined | null, provided: string) => {
-      if (!stored) return false;
-      try {
-        const ok = await compare(provided, stored);
-        if (ok) return true;
-      } catch {
-        /* ignore */
-      }
-      // Legacy plain text fallback for old seeded data; remove when data cleaned
-      if (!stored.startsWith('$2')) return stored === provided;
-      return false;
-    };
-
     // Check master admin
     const master = await MasterAdmin.findOne({ username }).lean();
-    if (master && (await verifyPassword(master.password, password))) {
+    if (master && (await verifyStoredPassword(master.password, password))) {
       await clearFailedAuth({ key: throttleKey });
       return {
         id: master._id.toString(),
@@ -72,7 +59,7 @@ const credentialsProvider = Credentials({
 
     // Check active admin
     const admin = await Admin.findOne({ username, status: "active" }).lean();
-    if (admin && (await verifyPassword(admin.password, password))) {
+    if (admin && (await verifyStoredPassword(admin.password, password))) {
       await clearFailedAuth({ key: throttleKey });
       return {
         id: admin._id.toString(),
@@ -84,7 +71,7 @@ const credentialsProvider = Credentials({
 
     // Check user
     const user = await User.findOne({ username, status: { $ne: 'suspended' } }).lean();
-    if (user && (await verifyPassword(user.password, password))) {
+    if (user && (await verifyStoredPassword(user.password, password))) {
       await clearFailedAuth({ key: throttleKey });
       return {
         id: user._id.toString(),

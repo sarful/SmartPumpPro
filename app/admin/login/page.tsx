@@ -4,6 +4,7 @@ import { useState } from "react";
 import { getSession, signIn } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { getFriendlyLoginError } from "@/lib/login-error";
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -27,7 +28,7 @@ export default function AdminLoginPage() {
     });
     setLoading(false);
     if (res?.error) {
-      setError(res.error);
+      setError(getFriendlyLoginError(res.error));
     } else {
       const session = await getSession();
       const role = session?.user?.role;
@@ -98,7 +99,7 @@ export default function AdminLoginPage() {
         </div>
         <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
           <Link href="/admin/forgot-password" className="text-cyan-300 hover:text-cyan-200">
-            Forgot password?
+            Password help
           </Link>
           <Link href="/" className="text-cyan-300 hover:text-cyan-200">
             Go to Home

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import Link from "next/link";
+import { getFriendlyLoginError } from "@/lib/login-error";
 
 export default function UserLoginPage() {
   const [username, setUsername] = useState("");
@@ -25,7 +26,7 @@ export default function UserLoginPage() {
     });
     setLoading(false);
     if (res?.error) {
-      setError(res.error);
+      setError(getFriendlyLoginError(res.error));
     } else {
       window.location.href = "/user/dashboard";
     }
@@ -86,7 +87,7 @@ export default function UserLoginPage() {
         </div>
         <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
           <Link href="/user/forgot-password" className="text-cyan-300 hover:text-cyan-200">
-            Forgot password?
+            Password help
           </Link>
           <Link href="/" className="text-cyan-300 hover:text-cyan-200">
             Go to Home

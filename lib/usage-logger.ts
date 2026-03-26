@@ -9,7 +9,7 @@ type LogParams = {
   event: UsageEvent;
   usedMinutes?: number;
   addedMinutes?: number;
-  meta?: Record<string, any>;
+  meta?: Record<string, unknown>;
 };
 
 async function resolveUserId(

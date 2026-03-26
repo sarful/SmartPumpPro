@@ -9,6 +9,11 @@
 2. Set required vars:
    - `MONGODB_URI`
    - `NEXTAUTH_SECRET`
+   - `MOBILE_JWT_SECRET`
+   - `ESP32_DEVICE_SECRET`
+   - `CRON_SECRET`
+   - `NEXTAUTH_URL`
+   - `APP_BASE_URL`
    - `SEED_MASTER_PASSWORD`
 
 ## 3) Install
@@ -16,6 +21,8 @@
 npm install
 npm run db:setup
 ```
+
+`npm run db:setup` includes the password migration step, so any older plaintext account records are converted to bcrypt hashes automatically.
 
 ## 4) Run
 ```bash
@@ -30,4 +37,3 @@ npm run start
 - Users operate motor
 
 For detailed setup: `CODECANYON_INSTALL.md`.
-

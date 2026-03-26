@@ -4,6 +4,7 @@ type MobileRole = "master" | "admin" | "user";
 
 export type MobileAccessPayload = {
   sub: string;
+  sid: string;
   role: MobileRole;
   username: string;
   adminId?: string;

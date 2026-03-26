@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { getErrorMessage } from "@/lib/error-message";
 
 type AdminOption = { _id: string; username: string };
 
@@ -31,8 +32,8 @@ export default function UserRegisterPage() {
         if ((data.admins || []).length > 0) {
           setAdminId(data.admins[0]._id);
         }
-      } catch (err: any) {
-        setError(err instanceof Error ? err.message : "Failed to load admins");
+      } catch (err) {
+        setError(getErrorMessage(err, "Failed to load admins"));
       } finally {
         setFetchingAdmins(false);
       }
@@ -72,8 +73,8 @@ export default function UserRegisterPage() {
       setUsername("");
       setPassword("");
       router.push("/user/login");
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+    } catch (err) {
+      setError(getErrorMessage(err, "Unknown error"));
     } finally {
       setLoading(false);
     }

@@ -20,6 +20,28 @@ Required:
 
 - `MONGODB_URI`
 - `NEXTAUTH_SECRET` (min 32 chars)
+- `MOBILE_JWT_SECRET` (min 32 chars, used for mobile tokens)
+- `ESP32_DEVICE_SECRET` (shared secret required by `/api/esp32/poll`)
+- `CRON_SECRET` (required by `/api/internal/tick`)
+- `NEXTAUTH_URL`
+- `APP_BASE_URL`
+
+Device note:
+
+- Every ESP32 firmware client must send the `x-device-key` header with the same `ESP32_DEVICE_SECRET` value.
+
+Scheduler note:
+
+- Every scheduler call to `/api/internal/tick` must send the `x-cron-key` header with the same `CRON_SECRET` value.
+
+Password note:
+
+- Public self-service password reset is disabled.
+- Signed-in users can change their password from their role dashboard.
+
+Validation note:
+
+- `npm run build`, `npm run start`, and `npm run install:check` now fail fast if critical env values are missing or still use placeholder secrets.
 
 ## 2) Install Dependencies
 
@@ -66,6 +88,11 @@ Seeder env options:
 
 Seeder is idempotent (safe to run again).
 
+Password storage:
+
+- Web and mobile authentication require bcrypt-hashed passwords.
+- `npm run db:migrate` hashes any legacy plaintext account passwords before login compatibility is removed.
+
 ## Extra Docs
 
 - Codecanyon install: `CODECANYON_INSTALL.md`
@@ -83,3 +110,17 @@ npm run package:codecanyon
 Output folder:
 
 `dist/codecanyon/PumpPilot`
+
+## Quality Gates
+
+- Run `npm run lint -- .` to lint the maintained web source tree.
+- Run `npm run typecheck` in `smartpump-pro` and `smartpump-mobile` before release work.
+- Run `npm run release:validate` before a production deploy.
+- Generated buyer-package output under `dist/` and packaging scripts under `scripts/` are excluded from the main web lint gate so source quality checks stay focused on maintained app code.
+- Cross-platform release validation notes live in `../RELEASE_VALIDATION.md`.
+
+## Observability
+
+- Server-side incidents are persisted in `incident_logs` with source, route, request ID, platform, and metadata.
+- Mobile can report global crash/error events to `POST /api/mobile/client-log`.
+- Masters can inspect recent incidents through `GET /api/master/incidents`.

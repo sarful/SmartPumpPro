@@ -2,10 +2,11 @@ import { NextResponse, NextRequest } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import User from '@/models/User';
 import { addToQueue, getQueuePosition, isMotorBusy } from '@/lib/queue-engine';
-import { auth } from '@/lib/auth';
 import Admin from '@/models/Admin';
 import { isDeviceReadyEffective } from '@/lib/device-readiness';
 import { enforceRateLimit } from '@/lib/api-guard';
+import { reportIncident } from '@/lib/observability';
+import { requireWebMutationSession } from '@/lib/web-mutation-auth';
 
 type StartMotorRequestBody = {
   userId?: string;
@@ -17,10 +18,9 @@ export async function POST(req: NextRequest) {
     const limited = enforceRateLimit(req, 'motor-start', 30, 60_000);
     if (limited) return limited;
 
-    const session = await auth();
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const authResult = await requireWebMutationSession(['master', 'admin', 'user']);
+    if (authResult.response) return authResult.response;
+    const { session } = authResult;
 
     let body: StartMotorRequestBody;
     try {
@@ -95,8 +95,15 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ status: 'RUNNING', queuePosition: 0 });
-  } catch (error: any) {
-    console.error('Motor start error:', error);
-    return NextResponse.json({ error: 'Failed to start motor' }, { status: 500 });
+  } catch (error) {
+    const requestId = await reportIncident({
+      error,
+      source: 'motor_start',
+      route: '/api/motor/start',
+      platform: 'web',
+      ip: req.headers.get('x-forwarded-for'),
+      userAgent: req.headers.get('user-agent'),
+    });
+    return NextResponse.json({ error: 'Failed to start motor', requestId }, { status: 500 });
   }
 }

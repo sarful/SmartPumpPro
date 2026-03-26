@@ -1,7 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
+import { DashboardMessage } from "@/components/DashboardMessage";
+import { getErrorMessage } from "@/lib/error-message";
+import { AdminActionCards } from "@/components/admin/AdminActionCards";
+import { AdminFirmwareCodeSection } from "@/components/admin/AdminFirmwareCodeSection";
+import { AdminMinuteRequestsSection } from "@/components/admin/AdminMinuteRequestsSection";
+import { AdminQueueSection } from "@/components/admin/AdminQueueSection";
+import { AdminUsersTable } from "@/components/admin/AdminUsersTable";
 
 type UserRow = {
   _id: string;
@@ -51,6 +58,7 @@ export default function AdminDashboardPage() {
   const [rfidUid, setRfidUid] = useState<string>("");
   const [rfidLoading, setRfidLoading] = useState(false);
   const [rfidMessage, setRfidMessage] = useState<string | null>(null);
+  const [rfidError, setRfidError] = useState<string | null>(null);
   const [requests, setRequests] = useState<
     { _id: string; userId: string | { _id: string; username: string }; minutes: number; createdAt: string }[]
   >([]);
@@ -69,49 +77,634 @@ export default function AdminDashboardPage() {
   const displayInternetOnline = internetOnline && deviceReady !== false;
   const effectiveRuntimeHold = displayLoadShedding || !displayInternetOnline;
 
-  const esp32ArduinoCode = `#include <WiFiManager.h>
+  const esp32ArduinoCode = `/*
+===========================================================
+HARDWARE WIRING TABLE (ESP32 + RFID + LED + MOTOR)
+===========================================================
+
+WIFI
+----
+Uses WiFiManager (auto config portal)
+SSID: ESP32-Setup
+
+RFID RC522 (SPI)
+----------------
+RC522 SDA (SS)  -> GPIO5
+RC522 SCK       -> GPIO18
+RC522 MOSI      -> GPIO23
+RC522 MISO      -> GPIO19
+RC522 RST       -> GPIO13
+RC522 VCC       -> 3.3V
+RC522 GND       -> GND
+
+LED CONNECTION (220 ohm resistor)
+---------------------------------
+Motor LED        -> GPIO16
+Load LED         -> GPIO17
+Device LED       -> GPIO4
+Internet OK LED  -> GPIO2
+Internet FAIL    -> GPIO15
+
+LCD 16x2 (I2C)
+--------------
+SDA -> GPIO21
+SCL -> GPIO22
+VCC -> 5V
+GND -> GND
+
+INPUT SIGNALS
+-------------
+Load Pin         -> GPIO32
+Device Ready     -> GPIO33
+
+OUTPUT
+------
+Motor Relay      -> GPIO25
+
+===========================================================
+*/
+
+#include <WiFiManager.h>
+#include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <SPI.h>
+#include <MFRC522.h>
 
 // =========================
-// PumpPilot ESP32 Firmware
+// PIN CONFIG
 // =========================
+#define MOTOR_PIN   25
+#define LOAD_PIN    32
+#define DEVICE_PIN  33
 
-// ---- PIN CONFIG ----
-#define MOTOR_PIN 2
-#define LOAD_PIN 4
-#define DEVICE_PIN 5
+// RFID
+#define RFID_SS_PIN   5
+#define RFID_RST_PIN  13
+#define RFID_SCK_PIN  18
+#define RFID_MISO_PIN 19
+#define RFID_MOSI_PIN 23
 
-// ---- SIGNAL POLARITY TOGGLES ----
-// Set 1 if signal is ACTIVE LOW, else 0
+// LED
+#define LED_MOTOR     16
+#define LED_LOAD      17
+#define LED_DEVICE    4
+#define LED_NET_OK    2
+#define LED_NET_FAIL  15
+
+// =========================
+// CONFIG
+// =========================
+#define POLL_INTERVAL 5000UL
+#define FAIL_TIMEOUT  15000UL
+#define RFID_DEBOUNCE_MS 3000UL
 #define LOAD_ACTIVE_LOW 0
-#define DEVICE_READY_ACTIVE_LOW 1
+#define DEVICE_READY_ACTIVE_LOW 0
 
-// ---- TIMING ----
-#define POLL_INTERVAL_MS 5000
-#define HTTP_TIMEOUT_MS 8000
-
-// ---- SERVER CONFIG ----
-// Admin-based config with your ADMIN_ID
+const char* API_URL = "https://pms.mechatronicslab.net/api/esp32/poll";
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
-const char* API_HOST = "https://pms.mechatronicslab.net";
+const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
+
+// =========================
+// GLOBAL
+// =========================
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
 
 unsigned long lastPoll = 0;
+unsigned long lastRFID = 0;
+unsigned long lastSuccess = 0;
 
-bool readLoadSheddingPin() {
+// =========================
+// FUNCTIONS
+// =========================
+void setMotor(bool on) {
+  digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
+  digitalWrite(LED_MOTOR, on ? HIGH : LOW);
+}
+
+bool readLoad() {
   int raw = digitalRead(LOAD_PIN);
   return LOAD_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
 }
 
-bool readDeviceReadyPin() {
+bool readDevice() {
   int raw = digitalRead(DEVICE_PIN);
   return DEVICE_READY_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
 }
 
+void lcdMessage(const String& line1, const String& line2 = "") {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(line1.substring(0, 16));
+  lcd.setCursor(0, 1);
+  lcd.print(line2.substring(0, 16));
+}
+
+void updateNetLED() {
+  if (WiFi.status() == WL_CONNECTED) {
+    digitalWrite(LED_NET_OK, HIGH);
+    digitalWrite(LED_NET_FAIL, LOW);
+  } else {
+    digitalWrite(LED_NET_OK, LOW);
+    static bool blinkState = false;
+    static unsigned long lastBlink = 0;
+    if (millis() - lastBlink > 500) {
+      lastBlink = millis();
+      blinkState = !blinkState;
+      digitalWrite(LED_NET_FAIL, blinkState ? HIGH : LOW);
+    }
+  }
+}
+
+String readRFID() {
+  if (!rfid.PICC_IsNewCardPresent()) return "";
+  if (!rfid.PICC_ReadCardSerial()) return "";
+
+  String uid = "";
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    uid += String(rfid.uid.uidByte[i], HEX);
+  }
+
+  uid.toUpperCase();
+  rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
+  return uid;
+}
+
+void pollServer(const String& uid = "") {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  bool ls = readLoad();
+  bool dev = readDevice();
+
+  digitalWrite(LED_LOAD, ls ? HIGH : LOW);
+  digitalWrite(LED_DEVICE, dev ? HIGH : LOW);
+
+  String url = String(API_URL) +
+               "?adminId=" + ADMIN_ID +
+               "&ls=" + (ls ? "1" : "0") +
+               "&dev=" + (dev ? "1" : "0");
+  if (uid.length()) {
+    url += "&uid=" + uid;
+  }
+
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  HTTPClient http;
+  if (!http.begin(client, url)) {
+    return;
+  }
+
+  http.addHeader("x-device-key", DEVICE_KEY);
+  int code = http.GET();
+
+  if (code == HTTP_CODE_OK) {
+    String payload = http.getString();
+
+    StaticJsonDocument<512> doc;
+    if (!deserializeJson(doc, payload)) {
+      const char* status = doc["motorStatus"] | "OFF";
+      bool backendLS = doc["loadShedding"] | false;
+      bool backendDev = doc["deviceReady"] | false;
+      const char* cardMessage = doc["cardModeMessage"] | "";
+
+      bool turnOn =
+        (strcmp(status, "RUNNING") == 0) &&
+        !backendLS &&
+        !ls &&
+        dev &&
+        backendDev;
+
+      setMotor(turnOn);
+      lastSuccess = millis();
+
+      lcd.setCursor(0, 0);
+      lcd.print("M:");
+      lcd.print(turnOn ? "ON " : "OFF");
+      lcd.print(" L:");
+      lcd.print(ls ? "Y" : "N");
+      lcd.print(" D:");
+      lcd.print(dev ? "Y" : "N");
+
+      lcd.setCursor(0, 1);
+      if (uid.length()) {
+        lcd.print(String(cardMessage).substring(0, 16));
+      } else {
+        lcd.print(WiFi.status() == WL_CONNECTED ? "NET OK " : "NET FAIL");
+        lcd.print(" ");
+        lcd.print(backendLS ? "LS" : "OK");
+      }
+    }
+  }
+
+  http.end();
+}
+
+void failSafe() {
+  if (millis() - lastSuccess > FAIL_TIMEOUT) {
+    setMotor(false);
+  }
+}
+
+// =========================
+// SETUP
+// =========================
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(MOTOR_PIN, OUTPUT);
+  pinMode(LOAD_PIN, INPUT_PULLUP);
+  pinMode(DEVICE_PIN, INPUT_PULLUP);
+
+  pinMode(LED_MOTOR, OUTPUT);
+  pinMode(LED_LOAD, OUTPUT);
+  pinMode(LED_DEVICE, OUTPUT);
+  pinMode(LED_NET_OK, OUTPUT);
+  pinMode(LED_NET_FAIL, OUTPUT);
+
+  Wire.begin(21, 22);
+  lcd.init();
+  lcd.backlight();
+  lcdMessage("PumpPilot", "Booting...");
+
+  digitalWrite(MOTOR_PIN, LOW);
+  digitalWrite(LED_MOTOR, LOW);
+  digitalWrite(LED_LOAD, LOW);
+  digitalWrite(LED_DEVICE, LOW);
+  digitalWrite(LED_NET_OK, LOW);
+  digitalWrite(LED_NET_FAIL, LOW);
+
+  WiFiManager wm;
+  wm.autoConnect("ESP32-Setup");
+
+  Serial.println("WiFi Connected");
+  lcdMessage("WiFi Connected");
+
+  SPI.begin(RFID_SCK_PIN, RFID_MISO_PIN, RFID_MOSI_PIN, RFID_SS_PIN);
+  rfid.PCD_Init();
+}
+
+// =========================
+// LOOP
+// =========================
+void loop() {
+  updateNetLED();
+
+  String uid = readRFID();
+  if (uid.length() && millis() - lastRFID > RFID_DEBOUNCE_MS) {
+    lastRFID = millis();
+    Serial.println("RFID: " + uid);
+    lcdMessage("RFID", uid.substring(0, 16));
+    pollServer(uid);
+  }
+
+  if (millis() - lastPoll > POLL_INTERVAL) {
+    lastPoll = millis();
+    pollServer();
+  }
+
+  failSafe();
+}`;
+
+  const esp32MicroPythonCode = `"""
+===========================================================
+HARDWARE WIRING TABLE (ESP32 + RFID + LED + MOTOR)
+===========================================================
+
+WIFI
+----
+Set WIFI_SSID / WIFI_PASS below.
+
+RFID RC522 (SPI)
+----------------
+RC522 SDA (SS)  -> GPIO5
+RC522 SCK       -> GPIO18
+RC522 MOSI      -> GPIO23
+RC522 MISO      -> GPIO19
+RC522 RST       -> GPIO13
+RC522 VCC       -> 3.3V
+RC522 GND       -> GND
+
+LED CONNECTION (220 ohm resistor)
+---------------------------------
+Motor LED        -> GPIO16
+Load LED         -> GPIO17
+Device LED       -> GPIO4
+Internet OK LED  -> GPIO2
+Internet FAIL    -> GPIO15
+
+INPUT SIGNALS
+-------------
+Load Pin         -> GPIO32
+Device Ready     -> GPIO33
+
+OUTPUT
+------
+Motor Relay      -> GPIO25
+
+Requires:
+- urequests
+- mfrc522.py driver on the board filesystem
+===========================================================
+"""
+
+import network
+import time
+from machine import Pin, SPI
+import urequests
+import ujson
+from mfrc522 import MFRC522
+
+# =========================
+# CONFIG
+# =========================
+WIFI_SSID = "YOUR_WIFI_NAME"
+WIFI_PASS = "YOUR_WIFI_PASSWORD"
+
+API_URL = "https://pms.mechatronicslab.net/api/esp32/poll"
+ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}"
+DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET"
+
+POLL_INTERVAL_MS = 5000
+FAIL_TIMEOUT_MS = 20000
+RFID_DEBOUNCE_MS = 3000
+HTTP_TIMEOUT_SEC = 8
+
+# =========================
+# PIN CONFIG
+# =========================
+MOTOR_PIN = 25
+LOAD_PIN = 32
+DEVICE_PIN = 33
+
+LED_MOTOR = 16
+LED_LOAD = 17
+LED_DEVICE = 4
+LED_NET_OK = 2
+LED_NET_FAIL = 15
+
+RFID_SS_PIN = 5
+RFID_RST_PIN = 13
+RFID_SCK_PIN = 18
+RFID_MISO_PIN = 19
+RFID_MOSI_PIN = 23
+
+# =========================
+# HARDWARE
+# =========================
+motor_pin = Pin(MOTOR_PIN, Pin.OUT)
+load_pin = Pin(LOAD_PIN, Pin.IN)
+device_pin = Pin(DEVICE_PIN, Pin.IN)
+
+led_motor = Pin(LED_MOTOR, Pin.OUT)
+led_load = Pin(LED_LOAD, Pin.OUT)
+led_device = Pin(LED_DEVICE, Pin.OUT)
+led_net_ok = Pin(LED_NET_OK, Pin.OUT)
+led_net_fail = Pin(LED_NET_FAIL, Pin.OUT)
+
+spi = SPI(
+    2,
+    baudrate=1000000,
+    polarity=0,
+    phase=0,
+    sck=Pin(RFID_SCK_PIN),
+    mosi=Pin(RFID_MOSI_PIN),
+    miso=Pin(RFID_MISO_PIN),
+)
+rfid = MFRC522(spi=spi, gpioRst=RFID_RST_PIN, gpioCs=RFID_SS_PIN)
+
+last_poll = 0
+last_success = 0
+last_rfid = 0
+last_uid = ""
+net_fail_state = 0
+net_fail_blink_at = 0
+
+
+def set_motor(on):
+    value = 1 if on else 0
+    motor_pin.value(value)
+    led_motor.value(value)
+
+
+def read_load():
+    return load_pin.value() == 1
+
+
+def read_device():
+    return device_pin.value() == 1
+
+
+def connect_wifi():
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+
+    if not wlan.isconnected():
+        print("[WiFi] Connecting...")
+        wlan.connect(WIFI_SSID, WIFI_PASS)
+        start = time.ticks_ms()
+        while not wlan.isconnected():
+            if time.ticks_diff(time.ticks_ms(), start) > 15000:
+                print("[WiFi] Failed. Restarting...")
+                time.sleep_ms(1000)
+                raise RuntimeError("WiFi connection failed")
+            time.sleep_ms(250)
+
+    print("[WiFi] Connected:", wlan.ifconfig())
+    return wlan
+
+
+def ensure_wifi(wlan):
+    if wlan.isconnected():
+        return
+
+    print("[WiFi] Reconnecting...")
+    wlan.disconnect()
+    wlan.connect(WIFI_SSID, WIFI_PASS)
+
+    start = time.ticks_ms()
+    while not wlan.isconnected() and time.ticks_diff(time.ticks_ms(), start) < 10000:
+        time.sleep_ms(250)
+
+
+def update_net_led(wlan):
+    global net_fail_state, net_fail_blink_at
+
+    if wlan.isconnected():
+        led_net_ok.value(1)
+        led_net_fail.value(0)
+        return
+
+    led_net_ok.value(0)
+    now = time.ticks_ms()
+    if time.ticks_diff(now, net_fail_blink_at) > 500:
+        net_fail_blink_at = now
+        net_fail_state = 0 if net_fail_state else 1
+        led_net_fail.value(net_fail_state)
+
+
+def read_rfid():
+    stat, _ = rfid.request(rfid.REQIDL)
+    if stat != rfid.OK:
+        return ""
+
+    stat, raw_uid = rfid.anticoll()
+    if stat != rfid.OK:
+        return ""
+
+    uid = "".join("{:02X}".format(part) for part in raw_uid)
+    return uid
+
+
+def poll_server(uid=""):
+    global last_success
+
+    if wlan.isconnected() is False:
+        return
+
+    ls = read_load()
+    dev = read_device()
+
+    led_load.value(1 if ls else 0)
+    led_device.value(1 if dev else 0)
+
+    url = "{}?adminId={}&ls={}&dev={}".format(
+        API_URL,
+        ADMIN_ID,
+        "1" if ls else "0",
+        "1" if dev else "0",
+    )
+    if uid:
+        url += "&uid={}".format(uid)
+
+    response = None
+    try:
+        response = urequests.get(
+            url,
+            headers={"x-device-key": DEVICE_KEY},
+            timeout=HTTP_TIMEOUT_SEC,
+        )
+
+        if response.status_code != 200:
+            print("[HTTP] code=", response.status_code)
+            return
+
+        payload = response.text
+        doc = ujson.loads(payload)
+
+        status = doc.get("motorStatus", "OFF")
+        backend_ls = doc.get("loadShedding", False)
+
+        turn_on = (status == "RUNNING") and (not backend_ls) and (not ls) and dev
+        set_motor(turn_on)
+        last_success = time.ticks_ms()
+
+        print("[POLL] status={} ls={} dev={} uid={}".format(status, backend_ls, dev, uid or "-"))
+
+    except Exception as exc:
+        print("[ERROR]", exc)
+    finally:
+        if response is not None:
+            response.close()
+
+
+def fail_safe():
+    if time.ticks_diff(time.ticks_ms(), last_success) > FAIL_TIMEOUT_MS:
+        set_motor(False)
+
+
+wlan = connect_wifi()
+
+while True:
+    ensure_wifi(wlan)
+    update_net_led(wlan)
+
+    uid = read_rfid()
+    now = time.ticks_ms()
+
+    if uid and (uid != last_uid or time.ticks_diff(now, last_rfid) > RFID_DEBOUNCE_MS):
+        last_uid = uid
+        last_rfid = now
+        print("RFID:", uid)
+        poll_server(uid)
+
+    if time.ticks_diff(now, last_poll) >= POLL_INTERVAL_MS:
+        last_poll = now
+        poll_server()
+
+    fail_safe()
+    time.sleep_ms(25)`;
+
+  const esp8266Code = `#include <ESP8266WiFi.h>
+#include <WiFiManager.h>
+#include <WiFiClientSecureBearSSL.h>
+#include <ESP8266HTTPClient.h>
+#include <ArduinoJson.h>
+
+/*
+===========================================================
+HARDWARE WIRING TABLE (ESP8266 / NodeMCU + MOTOR)
+===========================================================
+
+WIFI
+----
+Uses WiFiManager (auto config portal)
+SSID: ESP8266-Setup
+
+RECOMMENDED NODEMCU PINS
+------------------------
+Motor Relay      -> D1 (GPIO5)
+Load Pin         -> D2 (GPIO4)
+Device Ready Pin -> D5 (GPIO14)
+Status LED       -> D4 (GPIO2, built-in LED on many boards)
+
+NOTES
+-----
+- Adjust pins if your board wiring is different
+- GPIO2 is often active-low on built-in LED boards
+- This template does not include RFID because ESP8266 GPIO is tight
+
+===========================================================
+*/
+
+#define MOTOR_PIN 5
+#define LOAD_PIN 4
+#define DEVICE_PIN 14
+#define STATUS_LED_PIN 2
+
+#define STATUS_LED_ACTIVE_LOW 1
+#define POLL_INTERVAL_MS 5000UL
+#define FAILSAFE_TIMEOUT_MS 20000UL
+#define HTTP_TIMEOUT_MS 8000UL
+
+const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
+const char* API_HOST = "https://pms.mechatronicslab.net";
+const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
+
+unsigned long lastPoll = 0;
+unsigned long lastSuccess = 0;
+
+void writeStatusLed(bool on) {
+  digitalWrite(STATUS_LED_PIN, STATUS_LED_ACTIVE_LOW ? (on ? LOW : HIGH) : (on ? HIGH : LOW));
+}
+
+bool readLoadPin() {
+  return digitalRead(LOAD_PIN) == HIGH;
+}
+
+bool readDeviceReadyPin() {
+  return digitalRead(DEVICE_PIN) == HIGH;
+}
+
 void setMotor(bool on) {
   digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
-  Serial.printf("[LED] %s\\n", on ? "ON" : "OFF");
+  writeStatusLed(on);
+  Serial.printf("[MOTOR] %s\\n", on ? "ON" : "OFF");
 }
 
 void ensureWiFi() {
@@ -123,56 +716,38 @@ void ensureWiFi() {
   unsigned long start = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
     delay(250);
-    Serial.print(".");
   }
-  Serial.println();
 }
 
 void pollServer() {
   if (WiFi.status() != WL_CONNECTED) return;
 
-  bool localLS = readLoadSheddingPin();
+  bool localLS = readLoadPin();
   bool localDeviceReady = readDeviceReadyPin();
 
-  Serial.printf("[PIN] loadRaw=%d devRaw=%d ls=%d dev=%d\\n",
-                digitalRead(LOAD_PIN),
-                digitalRead(DEVICE_PIN),
-                localLS,
-                localDeviceReady);
-
-  WiFiClientSecure client;
-  client.setInsecure(); // quick test; use certificate pinning for hardened security
+  std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
+  client->setInsecure();
 
   HTTPClient http;
   String url = String(API_HOST) +
-               "/api/esp32/poll/?adminId=" + ADMIN_ID +
+               "/api/esp32/poll?adminId=" + ADMIN_ID +
                "&ls=" + (localLS ? "1" : "0") +
                "&dev=" + (localDeviceReady ? "1" : "0");
 
-  const char* headerKeys[] = {"Location"};
-  http.collectHeaders(headerKeys, 1);
   http.setConnectTimeout(HTTP_TIMEOUT_MS);
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.setReuse(false);
 
-  if (!http.begin(client, url)) {
+  if (!http.begin(*client, url)) {
     Serial.println("[HTTP] begin failed");
     return;
   }
 
+  http.addHeader("x-device-key", DEVICE_KEY);
   int code = http.GET();
-  if (code == 301 || code == 302 || code == 307 || code == 308) {
-    String location = http.header("Location");
-    Serial.printf("[HTTP] redirect %d -> %s\\n", code, location.c_str());
-    http.end();
-    if (location.length() == 0 || !http.begin(client, location)) {
-      Serial.println("[HTTP] redirect begin failed");
-      return;
-    }
-    code = http.GET();
-  }
+
   if (code != HTTP_CODE_OK) {
-    Serial.printf("[HTTP] code=%d err=%s\\n", code, http.errorToString(code).c_str());
+    Serial.printf("[HTTP] code=%d\\n", code);
     http.end();
     return;
   }
@@ -188,38 +763,41 @@ void pollServer() {
   }
 
   const char* status = doc["motorStatus"] | "OFF";
-  bool loadShedding = doc["loadShedding"] | false;
-  bool backendDeviceReady = doc["deviceReady"] | false;
-  const char* adminName = doc["adminName"] | "unknown";
-
-  Serial.printf("[POLL] admin=%s status=%s ls=%d localLS=%d dev=%d backendDev=%d\\n",
-                adminName, status, loadShedding, localLS, localDeviceReady, backendDeviceReady);
+  bool backendLoadShedding = doc["loadShedding"] | false;
 
   bool turnOn =
-      (strcmp(status, "RUNNING") == 0) &&
-      !loadShedding &&
-      !localLS &&
-      localDeviceReady;
+    (strcmp(status, "RUNNING") == 0) &&
+    !backendLoadShedding &&
+    !localLS &&
+    localDeviceReady;
 
   setMotor(turnOn);
+  lastSuccess = millis();
+
+  Serial.printf("[POLL] status=%s ls=%d dev=%d\\n", status, backendLoadShedding, localDeviceReady);
+}
+
+void failSafe() {
+  if (millis() - lastSuccess > FAILSAFE_TIMEOUT_MS) {
+    setMotor(false);
+  }
 }
 
 void setup() {
   Serial.begin(115200);
-  delay(300);
 
   pinMode(MOTOR_PIN, OUTPUT);
-  digitalWrite(MOTOR_PIN, LOW);
-
   pinMode(LOAD_PIN, INPUT_PULLUP);
   pinMode(DEVICE_PIN, INPUT_PULLUP);
+  pinMode(STATUS_LED_PIN, OUTPUT);
 
-  WiFi.setSleep(false);
+  digitalWrite(MOTOR_PIN, LOW);
+  writeStatusLed(false);
 
   WiFiManager wm;
   wm.setConfigPortalTimeout(180);
-  if (!wm.autoConnect("PumpPilot-Setup")) {
-    Serial.println("[WiFi] Config timeout. Restarting...");
+
+  if (!wm.autoConnect("ESP8266-Setup")) {
     delay(2000);
     ESP.restart();
   }
@@ -230,382 +808,453 @@ void setup() {
 
 void loop() {
   ensureWiFi();
-  unsigned long now = millis();
 
+  unsigned long now = millis();
   if (now - lastPoll >= POLL_INTERVAL_MS) {
     lastPoll = now;
     pollServer();
   }
 
+  failSafe();
   delay(10);
 }`;
 
-  const esp32MicroPythonCode = `import network
-import time
-import machine
-import urequests
-import ujson
+  const ttgoTCallCode = `#define TINY_GSM_MODEM_SIM800
 
-# =========================
-# PumpPilot ESP32 MicroPython
-# =========================
+/*
+===========================================================
+HARDWARE WIRING TABLE (TTGO T-CALL + LCD + RFID + SAFE PINS)
+===========================================================
 
-# ---------- CONFIG ----------
-WIFI_SSID = "YOUR_WIFI_NAME"
-WIFI_PASS = "YOUR_WIFI_PASSWORD"
+MODEM (AUTO CONNECTED)
+----------------------
+GPIO27 -> TX
+GPIO26 -> RX
+GPIO23 -> POWER
+GPIO5  -> RESET
+GPIO4  -> PWKEY
 
-MOTOR_PIN = 2
-LOAD_PIN = 4
-DEVICE_PIN = 5
+DO NOT USE ABOVE PINS
 
-# Set 1 if signal is ACTIVE LOW, else 0
-LOAD_ACTIVE_LOW = 0
-DEVICE_READY_ACTIVE_LOW = 1
+LCD 16x2 (I2C)
+--------------
+SDA -> GPIO21
+SCL -> GPIO22
+VCC -> 5V
+GND -> GND
 
-POLL_INTERVAL_MS = 5000
-HTTP_TIMEOUT_MS = 6  # seconds
+RFID RC522 (SPI)
+----------------
+SDA  -> GPIO15
+SCK  -> GPIO18
+MOSI -> GPIO14
+MISO -> GPIO19
+RST  -> GPIO13
+VCC  -> 3.3V
 
-ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}"
-API_HOST = "https://pms.mechatronicslab.net"
+SAFE LED MAP
+------------
+Motor LED      -> GPIO16
+Load LED       -> GPIO17
+Device LED     -> LCD only
+NET OK LED     -> LCD only
+NET FAIL LED   -> LCD only
 
-# ---------- SETUP ----------
-motor = machine.Pin(MOTOR_PIN, machine.Pin.OUT)
-load_pin = machine.Pin(LOAD_PIN, machine.Pin.IN, machine.Pin.PULL_UP)
-device_pin = machine.Pin(DEVICE_PIN, machine.Pin.IN, machine.Pin.PULL_UP)
+INPUT
+-----
+LOAD   -> GPIO32
+DEVICE -> GPIO33
 
-last_poll = 0
+OUTPUT
+------
+MOTOR -> GPIO25
 
-# ---------- FUNCTIONS ----------
+NOTES
+-----
+- GPIO23 stays reserved for SIM800 power control
+- RFID MOSI moved to GPIO14 to avoid the modem conflict
+- Device and network status are shown on the LCD instead of risky extra LED pins
+===========================================================
+*/
 
-def set_motor(on):
-    motor.value(1 if on else 0)
-    print("[LED]", "ON" if on else "OFF")
-
-def read_load_shedding():
-    raw = load_pin.value()
-    return (raw == 0) if LOAD_ACTIVE_LOW else (raw == 1)
-
-def read_device_ready():
-    raw = device_pin.value()
-    return (raw == 0) if DEVICE_READY_ACTIVE_LOW else (raw == 1)
-
-
-def connect_wifi():
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-
-    if not wlan.isconnected():
-        print("Connecting to WiFi...")
-        wlan.connect(WIFI_SSID, WIFI_PASS)
-
-        timeout_sec = 10
-        start = time.time()
-
-        while not wlan.isconnected():
-            if (time.time() - start) > timeout_sec:
-                print("WiFi Failed. Restarting...")
-                machine.reset()
-            time.sleep(0.25)
-
-    print("WiFi Connected:", wlan.ifconfig())
-    return wlan
-
-
-def ensure_wifi(wlan):
-    if not wlan.isconnected():
-        print("[WiFi] reconnecting...")
-        wlan.disconnect()
-        wlan.connect(WIFI_SSID, WIFI_PASS)
-        t0 = time.time()
-        while not wlan.isconnected() and (time.time() - t0) < 10:
-            time.sleep(0.25)
-        print("[WiFi] ok" if wlan.isconnected() else "[WiFi] reconnect failed")
-
-
-def poll_server(wlan):
-    if not wlan.isconnected():
-        return
-
-    raw_ls = load_pin.value()
-    raw_dev = device_pin.value()
-    local_ls = read_load_shedding()
-    local_dev = read_device_ready()
-
-    print("[PIN] loadRaw={} devRaw={} ls={} dev={}".format(raw_ls, raw_dev, local_ls, local_dev))
-
-    url = "{}/api/esp32/poll/?adminId={}&ls={}&dev={}".format(
-        API_HOST,
-        ADMIN_ID,
-        "1" if local_ls else "0",
-        "1" if local_dev else "0",
-    )
-
-    try:
-        response = urequests.get(url, timeout=HTTP_TIMEOUT_MS)
-
-        if response.status_code != 200:
-            print("[HTTP] code=", response.status_code)
-            response.close()
-            return
-
-        payload = response.text
-        response.close()
-
-        doc = ujson.loads(payload)
-
-        status = doc.get("motorStatus", "OFF")
-        load_shedding = doc.get("loadShedding", False)
-        backend_dev = doc.get("deviceReady", False)
-        admin_name = doc.get("adminName", "unknown")
-
-        print("[POLL] admin={} status={} ls={} localLS={} dev={} backendDev={}".format(
-            admin_name,
-            status,
-            load_shedding,
-            local_ls,
-            local_dev,
-            backend_dev
-        ))
-
-        turn_on = (status == "RUNNING") and (not load_shedding) and (not local_ls) and local_dev
-        set_motor(turn_on)
-
-    except Exception as e:
-        print("[ERROR]", e)
-
-
-# ---------- MAIN ----------
-wlan = connect_wifi()
-
-while True:
-    ensure_wifi(wlan)
-
-    now = time.ticks_ms()
-
-    if time.ticks_diff(now, last_poll) >= POLL_INTERVAL_MS:
-        last_poll = now
-        poll_server(wlan)
-
-    time.sleep_ms(10)`;
-
-  const esp8266Code = `#include <ESP8266WiFi.h>
-#include <WiFiManager.h>
-#include <WiFiClientSecureBearSSL.h>
-#include <ESP8266HTTPClient.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <HardwareSerial.h>
+#include <TinyGsmClient.h>
 #include <ArduinoJson.h>
+#include <SPI.h>
+#include <MFRC522.h>
 
-// =========================
-// PumpPilot ESP8266 Firmware
-// =========================
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-// NodeMCU example:
-// D4=GPIO2, D2=GPIO4, D1=GPIO5
-#define MOTOR_PIN 2
-#define LOAD_PIN 4
-#define DEVICE_PIN 5
+#define MODEM_RST 5
+#define MODEM_PWKEY 4
+#define MODEM_POWER_ON 23
+#define MODEM_TX 27
+#define MODEM_RX 26
 
-// Set 1 if signal is ACTIVE LOW, else 0
+#define MOTOR_PIN 25
+#define LOAD_PIN 32
+#define DEVICE_PIN 33
+
+#define RFID_SS 15
+#define RFID_RST 13
+#define RFID_SCK 18
+#define RFID_MISO 19
+#define RFID_MOSI 14
+
+#define LED_MOTOR 16
+#define LED_LOAD 17
+#define LED_DEVICE -1
+#define LED_NET_OK -1
+#define LED_NET_FAIL -1
+
+#define POLL_INTERVAL_MS 5000UL
+#define RFID_DEBOUNCE_MS 3000UL
+#define FAILSAFE_TIMEOUT_MS 15000UL
 #define LOAD_ACTIVE_LOW 0
-#define DEVICE_READY_ACTIVE_LOW 1
+#define DEVICE_READY_ACTIVE_LOW 0
 
-#define POLL_INTERVAL_MS 5000
-#define HTTP_TIMEOUT_MS 8000
-
+const char APN[] = "internet";
+const char* API_URL = "https://pms.mechatronicslab.net/api/esp32/poll";
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
-const char* API_HOST = "https://pms.mechatronicslab.net";
+const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
+
+HardwareSerial SerialAT(1);
+TinyGsm modem(SerialAT);
+TinyGsmClient client(modem);
+MFRC522 rfid(RFID_SS, RFID_RST);
 
 unsigned long lastPoll = 0;
+unsigned long lastRFID = 0;
+unsigned long lastSuccess = 0;
 
-bool readLoadSheddingPin() {
-  int raw = digitalRead(LOAD_PIN);
-  return LOAD_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+void lcdMessage(const String& line1, const String& line2 = "") {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(line1.substring(0, 16));
+  lcd.setCursor(0, 1);
+  lcd.print(line2.substring(0, 16));
 }
 
-bool readDeviceReadyPin() {
-  int raw = digitalRead(DEVICE_PIN);
-  return DEVICE_READY_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+void writeOptionalPin(int pin, bool on) {
+  if (pin < 0) return;
+  digitalWrite(pin, on ? HIGH : LOW);
+}
+
+void setupModem() {
+  pinMode(MODEM_POWER_ON, OUTPUT);
+  pinMode(MODEM_PWKEY, OUTPUT);
+  pinMode(MODEM_RST, OUTPUT);
+
+  digitalWrite(MODEM_POWER_ON, HIGH);
+  delay(100);
+  digitalWrite(MODEM_PWKEY, HIGH);
+  delay(1000);
+  digitalWrite(MODEM_PWKEY, LOW);
+}
+
+bool connectGSM() {
+  lcdMessage("Connecting GSM", "Please wait");
+
+  modem.restart();
+  if (!modem.waitForNetwork(60000L)) {
+    lcdMessage("GSM Network", "Failed");
+    return false;
+  }
+  if (!modem.gprsConnect(APN, "", "")) {
+    lcdMessage("GPRS", "Failed");
+    return false;
+  }
+
+  lcdMessage("GSM Connected");
+  delay(800);
+  return true;
 }
 
 void setMotor(bool on) {
   digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
-  Serial.printf("[LED] %s\\n", on ? "ON" : "OFF");
+  writeOptionalPin(LED_MOTOR, on);
 }
 
-void ensureWiFi() {
-  if (WiFi.status() == WL_CONNECTED) return;
+String httpGET(const String& url, int& code) {
+  code = -1;
 
-  Serial.println("[WiFi] Reconnecting...");
-  WiFi.reconnect();
+  String host = "pms.mechatronicslab.net";
+  String path = url;
+  int protocolIndex = path.indexOf("://");
+  if (protocolIndex >= 0) {
+    int hostStart = protocolIndex + 3;
+    int pathStart = path.indexOf('/', hostStart);
+    if (pathStart > hostStart) {
+      host = path.substring(hostStart, pathStart);
+      path = path.substring(pathStart);
+    }
+  }
+
+  if (!client.connect(host.c_str(), 80)) {
+    return "";
+  }
+
+  client.print(String("GET ") + path + " HTTP/1.1\\r\\n");
+  client.print(String("Host: ") + host + "\\r\\n");
+  client.print(String("x-device-key: ") + DEVICE_KEY + "\\r\\n");
+  client.print("Connection: close\\r\\n\\r\\n");
 
   unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
-    delay(250);
-    Serial.print(".");
+  while (!client.available() && millis() - start < 10000UL) {
+    delay(10);
   }
-  Serial.println();
+
+  String statusLine = client.readStringUntil('\\n');
+  int firstSpace = statusLine.indexOf(' ');
+  code = statusLine.substring(firstSpace + 1).toInt();
+
+  while (client.connected()) {
+    String line = client.readStringUntil('\\n');
+    if (line == "\\r") break;
+  }
+
+  String body = client.readString();
+  client.stop();
+  return body;
+}
+
+String readRFID() {
+  if (!rfid.PICC_IsNewCardPresent()) return "";
+  if (!rfid.PICC_ReadCardSerial()) return "";
+
+  String uid = "";
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    uid += String(rfid.uid.uidByte[i], HEX);
+  }
+
+  uid.toUpperCase();
+  rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
+  return uid;
+}
+
+void sendRFID(const String& uid) {
+  bool ls = LOAD_ACTIVE_LOW ? (digitalRead(LOAD_PIN) == LOW) : (digitalRead(LOAD_PIN) == HIGH);
+  bool dev = DEVICE_READY_ACTIVE_LOW ? (digitalRead(DEVICE_PIN) == LOW) : (digitalRead(DEVICE_PIN) == HIGH);
+
+  String url = String(API_URL) +
+               "?adminId=" + String(ADMIN_ID) +
+               "&ls=" + (ls ? "1" : "0") +
+               "&dev=" + (dev ? "1" : "0") +
+               "&uid=" + uid;
+
+  int code;
+  String body = httpGET(url, code);
+
+  lcdMessage("RFID:", uid.substring(0, 8));
+
+  if (code != 200) {
+    lcdMessage("RFID Send Fail", String(code));
+    return;
+  }
+
+  StaticJsonDocument<512> doc;
+  if (deserializeJson(doc, body)) {
+    lcdMessage("RFID Parse", "Failed");
+    return;
+  }
+
+  const char* message = doc["cardModeMessage"] | "RFID done";
+  lcdMessage("RFID Result", String(message));
 }
 
 void pollServer() {
-  if (WiFi.status() != WL_CONNECTED) return;
+  bool ls = LOAD_ACTIVE_LOW ? (digitalRead(LOAD_PIN) == LOW) : (digitalRead(LOAD_PIN) == HIGH);
+  bool dev = DEVICE_READY_ACTIVE_LOW ? (digitalRead(DEVICE_PIN) == LOW) : (digitalRead(DEVICE_PIN) == HIGH);
 
-  bool localLS = readLoadSheddingPin();
-  bool localDeviceReady = readDeviceReadyPin();
+  writeOptionalPin(LED_LOAD, ls);
+  writeOptionalPin(LED_DEVICE, dev);
 
-  Serial.printf("[PIN] loadRaw=%d devRaw=%d ls=%d dev=%d\\n",
-                digitalRead(LOAD_PIN),
-                digitalRead(DEVICE_PIN),
-                localLS,
-                localDeviceReady);
+  String url = String(API_URL) +
+               "?adminId=" + String(ADMIN_ID) +
+               "&ls=" + (ls ? "1" : "0") +
+               "&dev=" + (dev ? "1" : "0");
 
-  std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
-  client->setInsecure(); // quick test; use certificate pinning for hardened security
-
-  HTTPClient http;
-
-  String url = String(API_HOST) +
-               "/api/esp32/poll/?adminId=" + ADMIN_ID +
-               "&ls=" + (localLS ? "1" : "0") +
-               "&dev=" + (localDeviceReady ? "1" : "0");
-
-  const char* headerKeys[] = {"Location"};
-  http.collectHeaders(headerKeys, 1);
-  http.setConnectTimeout(HTTP_TIMEOUT_MS);
-  http.setTimeout(HTTP_TIMEOUT_MS);
-  http.setReuse(false);
-
-  if (!http.begin(*client, url)) {
-    Serial.println("[HTTP] begin failed");
-    return;
-  }
-
-  int code = http.GET();
-  if (code == 301 || code == 302 || code == 307 || code == 308) {
-    String location = http.header("Location");
-    Serial.printf("[HTTP] redirect %d -> %s\\n", code, location.c_str());
-    http.end();
-    if (location.length() == 0 || !http.begin(*client, location)) {
-      Serial.println("[HTTP] redirect begin failed");
-      return;
-    }
-    code = http.GET();
-  }
-
-  if (code != HTTP_CODE_OK) {
-    Serial.printf("[HTTP] code=%d err=%s\\n", code, http.errorToString(code).c_str());
-    http.end();
-    return;
-  }
-
-  String payload = http.getString();
-  http.end();
+  int code;
+  String body = httpGET(url, code);
+  if (code != 200) return;
 
   StaticJsonDocument<512> doc;
-  DeserializationError err = deserializeJson(doc, payload);
-
-  if (err) {
-    Serial.println("[JSON] parse error");
-    return;
-  }
+  if (deserializeJson(doc, body)) return;
 
   const char* status = doc["motorStatus"] | "OFF";
-  bool loadShedding = doc["loadShedding"] | false;
-  bool backendDeviceReady = doc["deviceReady"] | false;
-  const char* adminName = doc["adminName"] | "unknown";
+  bool backendLS = doc["loadShedding"] | false;
+  bool backendDev = doc["deviceReady"] | false;
 
-  Serial.printf("[POLL] admin=%s status=%s ls=%d localLS=%d dev=%d backendDev=%d\\n",
-                adminName, status, loadShedding, localLS, localDeviceReady, backendDeviceReady);
-
-  bool turnOn = (strcmp(status, "RUNNING") == 0) && !loadShedding && !localLS && localDeviceReady;
+  bool turnOn =
+    (strcmp(status, "RUNNING") == 0) &&
+    !backendLS &&
+    !ls &&
+    dev &&
+    backendDev;
 
   setMotor(turnOn);
+  lastSuccess = millis();
+
+  lcd.setCursor(0, 0);
+  lcd.print("Motor:");
+  lcd.print(turnOn ? "ON " : "OFF");
+  lcd.print(" LS:");
+  lcd.print(ls ? "Y" : "N");
+
+  lcd.setCursor(0, 1);
+  lcd.print("Dev:");
+  lcd.print(dev ? "OK" : "NO");
+  lcd.print(" Net:");
+  lcd.print(modem.isGprsConnected() ? "OK" : "NO");
+}
+
+void failSafe() {
+  if (millis() - lastSuccess > FAILSAFE_TIMEOUT_MS) {
+    setMotor(false);
+  }
+}
+
+void updateNetLED() {
+  if (modem.isGprsConnected()) {
+    writeOptionalPin(LED_NET_OK, true);
+    writeOptionalPin(LED_NET_FAIL, false);
+  } else {
+    writeOptionalPin(LED_NET_OK, false);
+    static bool state = false;
+    static unsigned long lastBlink = 0;
+    if (millis() - lastBlink > 500) {
+      lastBlink = millis();
+      state = !state;
+      writeOptionalPin(LED_NET_FAIL, state);
+    }
+  }
 }
 
 void setup() {
   Serial.begin(115200);
 
   pinMode(MOTOR_PIN, OUTPUT);
-  digitalWrite(MOTOR_PIN, LOW);
-
   pinMode(LOAD_PIN, INPUT_PULLUP);
   pinMode(DEVICE_PIN, INPUT_PULLUP);
 
-  WiFiManager wm;
-  wm.setConfigPortalTimeout(180);
+  pinMode(LED_MOTOR, OUTPUT);
+  pinMode(LED_LOAD, OUTPUT);
+  if (LED_DEVICE >= 0) pinMode(LED_DEVICE, OUTPUT);
+  if (LED_NET_OK >= 0) pinMode(LED_NET_OK, OUTPUT);
+  if (LED_NET_FAIL >= 0) pinMode(LED_NET_FAIL, OUTPUT);
 
-  if (!wm.autoConnect("PumpPilot-Setup")) {
-    delay(2000);
-    ESP.restart();
-  }
+  Wire.begin(21, 22);
+  lcd.init();
+  lcd.backlight();
+  lcdMessage("PumpPilot", "Booting...");
 
-  Serial.print("WiFi Connected. IP: ");
-  Serial.println(WiFi.localIP());
+  setupModem();
+  SerialAT.begin(9600, SERIAL_8N1, MODEM_RX, MODEM_TX);
+
+  SPI.begin(RFID_SCK, RFID_MISO, RFID_MOSI, RFID_SS);
+  rfid.PCD_Init();
+
+  connectGSM();
 }
 
 void loop() {
-  ensureWiFi();
+  if (!modem.isGprsConnected()) {
+    connectGSM();
+  }
 
-  unsigned long now = millis();
-  if (now - lastPoll >= POLL_INTERVAL_MS) {
-    lastPoll = now;
+  updateNetLED();
+
+  String uid = readRFID();
+  if (uid.length() && millis() - lastRFID > RFID_DEBOUNCE_MS) {
+    lastRFID = millis();
+    sendRFID(uid);
+  }
+
+  if (millis() - lastPoll > POLL_INTERVAL_MS) {
+    lastPoll = millis();
     pollServer();
   }
 
-  delay(10);
+  failSafe();
 }`;
 
-  const ttgoTCallCode = `#define TINY_GSM_MODEM_SIM800
+  const stm32Sim800lCode = `#define TINY_GSM_MODEM_SIM800
 #define TINY_GSM_RX_BUFFER 1024
 
 #include <TinyGsmClient.h>
 #include <ArduinoJson.h>
 
+/*
+===========================================================
+HARDWARE WIRING TABLE (STM32 + SIM800L + MOTOR)
+===========================================================
+
+SERIAL
+------
+SerialMon -> USB serial
+SerialAT  -> SIM800L serial pins (map per board)
+
+RECOMMENDED STM32 EXAMPLE PINS
+------------------------------
+Motor Relay      -> PA8
+Load Pin         -> PB0
+Device Ready Pin -> PB1
+Status LED       -> PC13 (adjust if your board differs)
+
+NOTES
+-----
+- Update APN / GPRS credentials for your SIM
+- Update SerialAT mapping for your STM32 board
+- This template is GSM-based and does not include RFID
+
+===========================================================
+*/
+
 #define SerialMon Serial
 #define SerialAT  Serial1
 
-// ---------- TTGO T-Call pins ----------
-#define MODEM_TX       27
-#define MODEM_RX       26
-#define MODEM_PWRKEY   4
-#define MODEM_POWER_ON 23
-#define MODEM_RST      5
+#define MOTOR_PIN      PA8
+#define LOAD_PIN       PB0
+#define DEVICE_PIN     PB1
+#define STATUS_LED_PIN PC13
 
-// ---------- Motor / Input pins ----------
-#define MOTOR_PIN   25
-#define LOAD_PIN    34
-#define DEVICE_PIN  35
-
-// ---------- Signal polarity ----------
-#define LOAD_ACTIVE_LOW          0
-#define DEVICE_READY_ACTIVE_LOW  1
-
+#define STATUS_LED_ACTIVE_LOW 1
 #define POLL_INTERVAL_MS 5000UL
+#define FAILSAFE_TIMEOUT_MS 20000UL
+#define HTTP_WAIT_TIMEOUT_MS 15000UL
 
-const char apn[]      = "internet"; // update for your SIM operator APN
+const char apn[]      = "internet";
 const char gprsUser[] = "";
 const char gprsPass[] = "";
 
-// ---------- Admin-based config ----------
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
 const char* SERVER   = "pms.mechatronicslab.net";
 const int   PORT     = 80;
+const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
 
 TinyGsm modem(SerialAT);
 TinyGsmClient client(modem);
-
 unsigned long lastPoll = 0;
+unsigned long lastSuccess = 0;
+
+void writeStatusLed(bool on) {
+  digitalWrite(STATUS_LED_PIN, STATUS_LED_ACTIVE_LOW ? (on ? LOW : HIGH) : (on ? HIGH : LOW));
+}
 
 bool readLoadShedding() {
-  int raw = digitalRead(LOAD_PIN);
-  return LOAD_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+  return digitalRead(LOAD_PIN) == HIGH;
 }
 
 bool readDeviceReady() {
-  int raw = digitalRead(DEVICE_PIN);
-  return DEVICE_READY_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+  return digitalRead(DEVICE_PIN) == HIGH;
 }
 
 void setMotor(bool on) {
   digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
+  writeStatusLed(on);
   SerialMon.printf("[MOTOR] %s\\n", on ? "ON" : "OFF");
 }
 
@@ -628,11 +1277,12 @@ bool connectGprsIfNeeded() {
   return true;
 }
 
-bool readHttpResponseBody(String& bodyOut) {
-  unsigned long t = millis();
+bool readHttpJson(String& bodyOut) {
+  unsigned long start = millis();
   while (client.connected() && !client.available()) {
-    if (millis() - t > 15000UL) {
-      SerialMon.println("[HTTP] Timeout waiting response");
+    if (millis() - start > HTTP_WAIT_TIMEOUT_MS) {
+      SerialMon.println("[HTTP] Timeout");
+      client.stop();
       return false;
     }
     delay(10);
@@ -650,206 +1300,6 @@ bool readHttpResponseBody(String& bodyOut) {
   if (codeStart >= 0) {
     statusCode = response.substring(codeStart + 9, codeStart + 12).toInt();
   }
-
-  if (statusCode != 200) {
-    SerialMon.printf("[HTTP] Non-200: %d\\n", statusCode);
-    return false;
-  }
-
-  int jsonStart = response.indexOf('{');
-  if (jsonStart < 0) {
-    SerialMon.println("[HTTP] JSON not found");
-    return false;
-  }
-
-  bodyOut = response.substring(jsonStart);
-  return true;
-}
-
-void pollServer() {
-  if (!connectGprsIfNeeded()) return;
-
-  bool localLS = readLoadShedding();
-  bool localDev = readDeviceReady();
-
-  String path = "/api/esp32/poll/?adminId=" + String(ADMIN_ID) +
-                "&ls=" + String(localLS ? "1" : "0") +
-                "&dev=" + String(localDev ? "1" : "0");
-
-  SerialMon.printf("[HTTP] GET %s\\n", path.c_str());
-
-  if (!client.connect(SERVER, PORT)) {
-    SerialMon.println("[HTTP] Connect failed");
-    return;
-  }
-
-  client.print(String("GET ") + path + " HTTP/1.1\\r\\n");
-  client.print(String("Host: ") + SERVER + "\\r\\n");
-  client.print("Connection: close\\r\\n\\r\\n");
-
-  String body;
-  if (!readHttpResponseBody(body)) return;
-
-  StaticJsonDocument<768> doc;
-  DeserializationError err = deserializeJson(doc, body);
-  if (err) {
-    SerialMon.printf("[JSON] Parse error: %s\\n", err.c_str());
-    return;
-  }
-
-  const char* motorStatus = doc["motorStatus"] | "OFF";
-  bool backendLS = doc["loadShedding"] | false;
-  bool backendDev = doc["deviceReady"] | false;
-  const char* adminName = doc["adminName"] | "unknown";
-
-  SerialMon.printf("[POLL] admin=%s status=%s ls=%d localLS=%d dev=%d backendDev=%d\\n",
-                   adminName, motorStatus, backendLS, localLS, localDev, backendDev);
-
-  bool turnOn = (strcmp(motorStatus, "RUNNING") == 0) &&
-                !backendLS &&
-                !localLS &&
-                localDev &&
-                backendDev;
-
-  setMotor(turnOn);
-}
-
-void powerOnModem() {
-  pinMode(MODEM_POWER_ON, OUTPUT);
-  pinMode(MODEM_PWRKEY, OUTPUT);
-  pinMode(MODEM_RST, OUTPUT);
-
-  digitalWrite(MODEM_POWER_ON, HIGH);
-  digitalWrite(MODEM_RST, HIGH);
-
-  digitalWrite(MODEM_PWRKEY, LOW);
-  delay(1000);
-  digitalWrite(MODEM_PWRKEY, HIGH);
-  delay(2000);
-  digitalWrite(MODEM_PWRKEY, LOW);
-}
-
-void setup() {
-  SerialMon.begin(115200);
-  delay(300);
-
-  pinMode(MOTOR_PIN, OUTPUT);
-  digitalWrite(MOTOR_PIN, LOW);
-  pinMode(LOAD_PIN, INPUT_PULLUP);
-  pinMode(DEVICE_PIN, INPUT_PULLUP);
-
-  powerOnModem();
-
-  SerialAT.begin(9600, SERIAL_8N1, MODEM_RX, MODEM_TX);
-  delay(3000);
-
-  SerialMon.println("[MODEM] Restarting...");
-  modem.restart();
-  connectGprsIfNeeded();
-}
-
-void loop() {
-  unsigned long now = millis();
-  if (now - lastPoll >= POLL_INTERVAL_MS) {
-    lastPoll = now;
-    pollServer();
-  }
-  delay(20);
-}`;
-
-  const stm32Sim800lCode = `#define TINY_GSM_MODEM_SIM800
-#define TINY_GSM_RX_BUFFER 1024
-
-#include <TinyGsmClient.h>
-#include <ArduinoJson.h>
-
-// =========================
-// PumpPilot STM32 + SIM800L
-// (STM32 Arduino Core)
-// =========================
-
-// ---------- Serial ----------
-#define SerialMon Serial
-#define SerialAT  Serial1   // map TX/RX in your STM32 variant
-
-// ---------- Motor / Input pins ----------
-#define MOTOR_PIN   PA8
-#define LOAD_PIN    PB0
-#define DEVICE_PIN  PB1
-
-// ---------- Signal polarity ----------
-#define LOAD_ACTIVE_LOW          0
-#define DEVICE_READY_ACTIVE_LOW  1
-
-// ---------- Timing ----------
-#define POLL_INTERVAL_MS 5000UL
-
-// ---------- GSM ----------
-const char apn[]      = "internet"; // update APN
-const char gprsUser[] = "";
-const char gprsPass[] = "";
-
-// ---------- Admin-based config ----------
-const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
-const char* SERVER   = "pms-two-kappa.vercel.app";
-const int   PORT     = 80;
-
-TinyGsm modem(SerialAT);
-TinyGsmClient client(modem);
-unsigned long lastPoll = 0;
-
-bool readLoadShedding() {
-  int raw = digitalRead(LOAD_PIN);
-  return LOAD_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
-}
-
-bool readDeviceReady() {
-  int raw = digitalRead(DEVICE_PIN);
-  return DEVICE_READY_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
-}
-
-void setMotor(bool on) {
-  digitalWrite(MOTOR_PIN, on ? HIGH : LOW);
-  SerialMon.printf("[MOTOR] %s\\n", on ? "ON" : "OFF");
-}
-
-bool connectGprsIfNeeded() {
-  if (modem.isGprsConnected()) return true;
-
-  SerialMon.println("[NET] Waiting network...");
-  if (!modem.waitForNetwork(60000L)) {
-    SerialMon.println("[NET] Network failed");
-    return false;
-  }
-
-  SerialMon.println("[NET] Connecting GPRS...");
-  if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
-    SerialMon.println("[NET] GPRS failed");
-    return false;
-  }
-
-  SerialMon.println("[NET] GPRS connected");
-  return true;
-}
-
-bool readHttpJson(String& bodyOut) {
-  unsigned long t = millis();
-  while (client.connected() && !client.available()) {
-    if (millis() - t > 15000UL) {
-      SerialMon.println("[HTTP] Timeout");
-      return false;
-    }
-    delay(10);
-  }
-
-  String response;
-  while (client.available()) response += client.readString();
-  client.stop();
-
-  int codeStart = response.indexOf("HTTP/1.1 ");
-  if (codeStart < 0) codeStart = response.indexOf("HTTP/1.0 ");
-  int statusCode = -1;
-  if (codeStart >= 0) statusCode = response.substring(codeStart + 9, codeStart + 12).toInt();
   if (statusCode != 200) {
     SerialMon.printf("[HTTP] Non-200: %d\\n", statusCode);
     return false;
@@ -860,6 +1310,7 @@ bool readHttpJson(String& bodyOut) {
     SerialMon.println("[HTTP] JSON missing");
     return false;
   }
+
   bodyOut = response.substring(jsonStart);
   return true;
 }
@@ -870,7 +1321,7 @@ void pollServer() {
   bool localLS = readLoadShedding();
   bool localDev = readDeviceReady();
 
-  String path = "/api/esp32/poll/?adminId=" + String(ADMIN_ID) +
+  String path = "/api/esp32/poll?adminId=" + String(ADMIN_ID) +
                 "&ls=" + (localLS ? "1" : "0") +
                 "&dev=" + (localDev ? "1" : "0");
 
@@ -881,6 +1332,7 @@ void pollServer() {
 
   client.print(String("GET ") + path + " HTTP/1.1\\r\\n");
   client.print(String("Host: ") + SERVER + "\\r\\n");
+  client.print(String("x-device-key: ") + DEVICE_KEY + "\\r\\n");
   client.print("Connection: close\\r\\n\\r\\n");
 
   String body;
@@ -896,17 +1348,24 @@ void pollServer() {
   const char* motorStatus = doc["motorStatus"] | "OFF";
   bool backendLS = doc["loadShedding"] | false;
   bool backendDev = doc["deviceReady"] | false;
-  const char* adminName = doc["adminName"] | "unknown";
-
-  SerialMon.printf("[POLL] admin=%s status=%s ls=%d localLS=%d dev=%d backendDev=%d\\n",
-                   adminName, motorStatus, backendLS, localLS, localDev, backendDev);
 
   bool turnOn = (strcmp(motorStatus, "RUNNING") == 0) &&
                 !backendLS &&
                 !localLS &&
                 localDev &&
                 backendDev;
+
   setMotor(turnOn);
+  lastSuccess = millis();
+
+  SerialMon.printf("[POLL] status=%s ls=%d localLS=%d dev=%d backendDev=%d\\n",
+                   motorStatus, backendLS, localLS, localDev, backendDev);
+}
+
+void failSafe() {
+  if (millis() - lastSuccess > FAILSAFE_TIMEOUT_MS) {
+    setMotor(false);
+  }
 }
 
 void setup() {
@@ -914,11 +1373,13 @@ void setup() {
   delay(300);
 
   pinMode(MOTOR_PIN, OUTPUT);
-  digitalWrite(MOTOR_PIN, LOW);
   pinMode(LOAD_PIN, INPUT_PULLUP);
   pinMode(DEVICE_PIN, INPUT_PULLUP);
+  pinMode(STATUS_LED_PIN, OUTPUT);
 
-  // set your modem baud / serial mapping as per STM32 board
+  digitalWrite(MOTOR_PIN, LOW);
+  writeStatusLed(false);
+
   SerialAT.begin(9600);
   delay(2000);
 
@@ -933,6 +1394,8 @@ void loop() {
     lastPoll = now;
     pollServer();
   }
+
+  failSafe();
   delay(20);
 }`;
 
@@ -957,10 +1420,13 @@ void loop() {
     }
   };
 
-  const loadData = async () => {
+  const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!isAdmin) return;
-    setLoading(true);
-    setError(null);
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const [usersRes, activityRes, statusRes, reqRes] = await Promise.all([
         fetch("/api/admin/users"),
@@ -983,18 +1449,30 @@ void loop() {
         setCardActiveUserId(statusJson.admin.cardActiveUserId ?? null);
       }
       if (reqRes.ok) setRequests(reqJson.requests ?? []);
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Failed to load data");
+    } catch (err) {
+      if (!silent) {
+        setError(getErrorMessage(err, "Failed to load data"));
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
-  };
+  }, [isAdmin]);
 
   useEffect(() => {
     if (status === "authenticated" && isAdmin) {
       loadData();
     }
-  }, [status, isAdmin]);
+  }, [status, isAdmin, loadData]);
+
+  useEffect(() => {
+    if (status !== "authenticated" || !isAdmin) return;
+    const intervalId = setInterval(() => {
+      loadData({ silent: true });
+    }, 5000);
+    return () => clearInterval(intervalId);
+  }, [status, isAdmin, loadData]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1021,8 +1499,8 @@ void loop() {
       if (!res.ok) throw new Error(json.error || "Create failed");
       setNewUser({ username: "", password: "" });
       await loadData();
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Create failed");
+    } catch (err) {
+      setError(getErrorMessage(err, "Create failed"));
     } finally {
       setCreateLoading(false);
     }
@@ -1041,8 +1519,8 @@ void loop() {
       if (!res.ok) throw new Error(json.error || "Recharge failed");
       setRechargeMinutes(0);
       await loadData();
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Recharge failed");
+    } catch (err) {
+      setError(getErrorMessage(err, "Recharge failed"));
     } finally {
       setRechargeLoading(false);
     }
@@ -1052,6 +1530,7 @@ void loop() {
     setRfidLoading(true);
     setError(null);
     setRfidMessage(null);
+    setRfidError(null);
     try {
       const payload = {
         userId: rfidTarget,
@@ -1071,8 +1550,10 @@ void loop() {
         setRfidMessage("RFID assigned");
       }
       await loadData();
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "RFID update failed");
+    } catch (err) {
+      const message = getErrorMessage(err, "RFID update failed");
+      setRfidError(message);
+      setError(message);
     } finally {
       setRfidLoading(false);
     }
@@ -1108,6 +1589,7 @@ void loop() {
 
   const handleDeleteUser = async (userId: string) => {
     setError(null);
+    if (!window.confirm("Delete this user permanently?")) return;
     const res = await fetch(`/api/admin/users?userId=${userId}`, {
       method: "DELETE",
     });
@@ -1122,6 +1604,7 @@ void loop() {
   const handleStopResetMotor = async (userId: string) => {
     setError(null);
     setStatusMessage(null);
+    if (!window.confirm("Stop and reset this user's motor session?")) return;
     setStopResetLoadingUserId(userId);
     try {
       const res = await fetch("/api/motor/stop", {
@@ -1136,8 +1619,8 @@ void loop() {
       }
       setStatusMessage("User motor stopped/reset successfully");
       await loadData();
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Failed to stop/reset motor");
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to stop/reset motor"));
     } finally {
       setStopResetLoadingUserId(null);
     }
@@ -1168,8 +1651,8 @@ void loop() {
         setStatusMessage("User motor started");
       }
       await loadData();
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Failed to start motor");
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to start motor"));
     } finally {
       setStartLoadingUserId(null);
     }
@@ -1178,6 +1661,7 @@ void loop() {
   const handleSuspendUser = async (userId: string) => {
     setError(null);
     setSuspendError(null);
+    if (!window.confirm("Suspend this user?")) return;
     const reasonPrompt = prompt("Suspend reason?");
     if (reasonPrompt === null) return;
     const reason = reasonPrompt.trim() || undefined;
@@ -1263,6 +1747,12 @@ void loop() {
             >
               Download History
             </a>
+            <a
+              href="/admin/change-password"
+              className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
+            >
+              Change Password
+            </a>
             <button
               onClick={() => signOut({ callbackUrl: "/admin/login" })}
               className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
@@ -1299,21 +1789,9 @@ void loop() {
           </div>
         </section>
 
-        {error && (
-          <div className="rounded-lg border border-red-500/40 bg-red-900/40 px-3 py-2 text-sm text-red-100">
-            {error}
-          </div>
-        )}
-        {suspendError && (
-          <div className="rounded-lg border border-red-500/40 bg-red-900/40 px-3 py-2 text-sm text-red-100">
-            {suspendError}
-          </div>
-        )}
-        {statusMessage && (
-          <div className="rounded-lg border border-emerald-500/40 bg-emerald-900/40 px-3 py-2 text-sm text-emerald-100">
-            {statusMessage}
-          </div>
-        )}
+        {error ? <DashboardMessage variant="error" title="Dashboard error" message={error} actionLabel="Retry" onAction={loadData} /> : null}
+        {suspendError ? <DashboardMessage variant="error" title="User action failed" message={suspendError} actionLabel="Retry" onAction={loadData} /> : null}
+        {statusMessage ? <DashboardMessage variant="success" message={statusMessage} /> : null}
 
         {loadShedding && (
           <div className="rounded-xl border border-amber-500/40 bg-amber-900/30 px-4 py-3 text-sm text-amber-100 shadow-lg shadow-amber-900/30">
@@ -1332,315 +1810,75 @@ void loop() {
         )}
 
         {loading ? (
-          <div className="text-sm text-slate-300">Loading data...</div>
+          <DashboardMessage
+            variant="info"
+            title="Loading dashboard"
+            message="We are syncing users, queue status, and pending requests."
+          />
         ) : (
           <>
-            <section className="mx-auto grid w-full max-w-5xl gap-4 lg:grid-cols-3">
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 shadow-xl shadow-slate-950/40">
-                <div className="text-sm text-slate-400">Create User</div>
-                <input
-                  className="mt-3 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400"
-                  placeholder="username"
-                  value={newUser.username}
-                  onChange={(e) => setNewUser((p) => ({ ...p, username: e.target.value }))}
-                />
-                <input
-                  type="password"
-                  className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400"
-                  placeholder="password (min 6)"
-                  value={newUser.password}
-                  onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))}
-                />
-                <button
-                  onClick={handleCreateUser}
-                  disabled={createLoading}
-                  className="mt-3 w-full rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-900/30 hover:bg-emerald-400 disabled:opacity-60"
-                >
-                  {createLoading ? "Creating..." : "Create User"}
-                </button>
-              </div>
+            <AdminActionCards
+              newUser={newUser}
+              createLoading={createLoading}
+              onNewUserChange={setNewUser}
+              onCreateUser={handleCreateUser}
+              users={users}
+              rechargeTarget={rechargeTarget}
+              rechargeMinutes={rechargeMinutes}
+              rechargeLoading={rechargeLoading}
+              onRechargeTargetChange={setRechargeTarget}
+              onRechargeMinutesChange={setRechargeMinutes}
+              onRecharge={handleRecharge}
+              rfidTarget={rfidTarget}
+              rfidUid={rfidUid}
+              rfidLoading={rfidLoading}
+              rfidMessage={rfidMessage}
+              rfidError={rfidError}
+              onRfidTargetChange={setRfidTarget}
+              onRfidUidChange={setRfidUid}
+              onAssignRfid={handleAssignRfid}
+            />
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 shadow-xl shadow-slate-950/40">
-                <div className="text-sm text-slate-400">Recharge Minutes</div>
-                <select
-                  className="mt-3 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
-                  value={rechargeTarget}
-                  onChange={(e) => setRechargeTarget(e.target.value)}
-                >
-                  <option value="">Select user</option>
-                  {users.map((u) => (
-                    <option key={u._id} value={u._id}>
-                      {u.username} (bal {u.availableMinutes}m)
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  min={1}
-                  className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
-                  placeholder="minutes to add"
-                  value={rechargeMinutes}
-                  onChange={(e) => setRechargeMinutes(Math.max(0, Number(e.target.value)))}
-                />
-                <button
-                  onClick={handleRecharge}
-                  disabled={rechargeLoading || !rechargeTarget || rechargeMinutes <= 0}
-                  className="mt-3 w-full rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-900 shadow-lg shadow-cyan-900/30 hover:bg-cyan-300 disabled:opacity-60"
-                >
-                  {rechargeLoading ? "Recharging..." : "Recharge"}
-                </button>
-              </div>
+            <AdminUsersTable
+              users={users}
+              effectiveRuntimeHold={effectiveRuntimeHold}
+              cardModeActive={cardModeActive}
+              cardActiveUserId={cardActiveUserId}
+              startLoadingUserId={startLoadingUserId}
+              stopResetLoadingUserId={stopResetLoadingUserId}
+              adminStatus={adminStatus}
+              loadShedding={loadShedding}
+              deviceReady={deviceReady}
+              internetOnline={internetOnline}
+              onStartMotor={handleStartMotor}
+              onStopResetMotor={handleStopResetMotor}
+              onDeleteUser={handleDeleteUser}
+              onSuspendUser={handleSuspendUser}
+              onUnsuspendUser={handleUnsuspendUser}
+            />
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 shadow-xl shadow-slate-950/40">
-                <div className="text-sm text-slate-400">RFID Card Registration</div>
-                <select
-                  className="mt-3 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
-                  value={rfidTarget}
-                  onChange={(e) => setRfidTarget(e.target.value)}
-                >
-                  <option value="">Select user</option>
-                  {users.map((u) => (
-                    <option key={u._id} value={u._id}>
-                      {u.username}
-                      {u.rfidUid ? ` (${u.rfidUid})` : ""}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100 uppercase"
-                  placeholder="RFID UID (UPPERCASE)"
-                  value={rfidUid}
-                  onChange={(e) => setRfidUid(e.target.value.toUpperCase())}
-                />
-                <div className="mt-3 flex gap-2">
-                  <button
-                    onClick={() => handleAssignRfid(false)}
-                    disabled={rfidLoading || !rfidTarget || !rfidUid.trim()}
-                    className="flex-1 rounded-xl bg-indigo-400 px-4 py-2 text-sm font-semibold text-slate-900 shadow-lg shadow-indigo-900/30 hover:bg-indigo-300 disabled:opacity-60"
-                  >
-                    {rfidLoading ? "Assigning..." : "Assign"}
-                  </button>
-                  <button
-                    onClick={() => handleAssignRfid(true)}
-                    disabled={rfidLoading || !rfidTarget}
-                    className="flex-1 rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800/40 disabled:opacity-60"
-                  >
-                    Clear
-                  </button>
-                </div>
-                {rfidMessage && <div className="mt-2 text-xs text-emerald-300">{rfidMessage}</div>}
-              </div>
-            </section>
+            <AdminQueueSection
+              queue={queue}
+              users={users}
+              effectiveRuntimeHold={effectiveRuntimeHold}
+              getName={getName}
+            />
 
-            <section className="mx-auto w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm text-slate-400">Users</div>
-                <div className="text-lg font-semibold text-slate-100">Your tenant</div>
-              </div>
-            </div>
-          <div className="mt-4 overflow-x-auto">
-            <table className="min-w-[760px] w-full text-sm">
-              <thead className="text-slate-400">
-                <tr>
-                  <th className="px-2 py-2 text-left">Username</th>
-                  <th className="px-2 py-2 text-left">RFID</th>
-                  <th className="px-2 py-2 text-left">Admin</th>
-                  <th className="px-2 py-2 text-left">Available</th>
-                  <th className="px-2 py-2 text-left">Motor</th>
-                  <th className="px-2 py-2 text-left">Running Time</th>
-                  <th className="px-2 py-2 text-left">Status</th>
-                  <th className="whitespace-nowrap px-2 py-2 text-center">Use</th>
-                  <th className="whitespace-nowrap px-2 py-2 text-left">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800 text-slate-100">
-                {users.map((u) => (
-                  <tr key={u._id}>
-                    <td className="px-2 py-2">{u.username}</td>
-                    <td className="px-2 py-2 text-xs text-slate-300">{u.rfidUid || "-"}</td>
-                  <td className="px-2 py-2">{u.adminName ?? "You"}</td>
-                  <td className="px-2 py-2">{u.availableMinutes} m</td>
-                  <td className="px-2 py-2">
-                    {u.motorStatus === "RUNNING" && effectiveRuntimeHold ? "HOLD" : u.motorStatus}
-                  </td>
-                  <td className="px-2 py-2">{u.motorRunningTime ?? 0} m</td>
-                  <td className="px-2 py-2">
-                    {u.status ?? "active"}
-                    {u.suspendReason ? ` (${u.suspendReason})` : ""}
-                  </td>
-                  <td className="px-2 py-2 text-center text-xs text-slate-300">
-                    {cardModeActive && cardActiveUserId === u._id
-                      ? "Card"
-                      : u.motorStatus === "RUNNING"
-                        ? "Web"
-                        : "-"}
-                  </td>
-                  <td className="px-2 py-2">
-                      <div className="flex min-w-0 flex-col gap-2 sm:min-w-[220px] sm:flex-row sm:flex-wrap">
-                        <button
-                          onClick={() => handleStartMotor(u._id, (u.motorRunningTime && u.motorRunningTime > 0) ? u.motorRunningTime : 5)}
-                          disabled={
-                            startLoadingUserId === u._id ||
-                            adminStatus !== "active" ||
-                            Boolean(loadShedding) ||
-                            deviceReady === false ||
-                            !internetOnline ||
-                            u.status === "suspended"
-                          }
-                          className="w-full rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-800/50 disabled:opacity-60 sm:w-auto"
-                        >
-                          {startLoadingUserId === u._id ? "Starting..." : "Start Motor"}
-                        </button>
-                        <button
-                          onClick={() => handleStopResetMotor(u._id)}
-                          disabled={stopResetLoadingUserId === u._id}
-                          className="w-full rounded-lg border border-cyan-500 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-800/50 disabled:opacity-60 sm:w-auto"
-                        >
-                          {stopResetLoadingUserId === u._id ? "Processing..." : "Stop/Reset"}
-                        </button>
-                        <button
-                          onClick={() => handleDeleteUser(u._id)}
-                          className="w-full rounded-lg border border-red-500 px-2 py-1 text-xs text-red-700 hover:bg-red-50 sm:w-auto"
-                        >
-                          Delete
-                        </button>
-                        {u.status === "suspended" ? (
-                          <button
-                            onClick={() => handleUnsuspendUser(u._id)}
-                            className="w-full rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 sm:w-auto"
-                          >
-                            Unsuspend
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleSuspendUser(u._id)}
-                            className="w-full rounded-lg border border-amber-500 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50 sm:w-auto"
-                          >
-                            Suspend
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                  {users.length === 0 && (
-                    <tr>
-                      <td className="px-2 py-3 text-slate-400" colSpan={8}>
-                        No users yet.
-                      </td>
-                    </tr>
-                  )}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+            <AdminMinuteRequestsSection
+              requests={requests}
+              users={users}
+              onApproveRequest={handleApproveRequest}
+              onDeclineRequest={handleDeclineRequest}
+              getName={getName}
+            />
 
-            <section className="mx-auto w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
-              <div className="text-sm text-slate-400">Queue / Activity</div>
-              <div className="mt-2 text-lg font-semibold text-slate-100">Running & Waiting</div>
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {queue.map((q) => {
-                  const userMap = Object.fromEntries(users.map((u) => [u._id, u.username]));
-                  const uname = getName(q.userId, userMap);
-                  return (
-                    <div
-                      key={q._id}
-                      className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-sm text-slate-100"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span>Pos #{q.position}</span>
-                        <span className="text-xs uppercase text-cyan-200">
-                          {q.status === "RUNNING" && effectiveRuntimeHold ? "HOLD" : q.status}
-                        </span>
-                      </div>
-                      <div className="mt-2 text-slate-300">User: {uname}</div>
-                      <div className="text-slate-400">Req: {q.requestedMinutes}m</div>
-                    </div>
-                  );
-                })}
-                {queue.length === 0 && (
-                  <div className="text-sm text-slate-400">No active queue.</div>
-                )}
-              </div>
-            </section>
-
-            <section className="mx-auto w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
-              <div className="text-sm text-slate-400">Minute Requests</div>
-              <div className="mt-3 text-xs text-slate-400">
-                Pending requests from your users
-              </div>
-              <div className="mt-4 space-y-3">
-                {requests.length === 0 && <p className="text-sm text-slate-300">No pending requests.</p>}
-                {requests.map((r) => {
-                  const userMap = Object.fromEntries(users.map((u) => [u._id, u.username]));
-                  const uname = getName(r.userId, userMap);
-                  return (
-                    <div
-                      key={r._id}
-                      className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100"
-                    >
-                      <div>
-                        <div>User: {uname}</div>
-                        <div className="text-slate-400">Minutes: {r.minutes}</div>
-                        <div className="text-slate-500 text-xs">
-                          {new Date(r.createdAt).toLocaleString()}
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleApproveRequest(r._id)}
-                          className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          onClick={() => handleDeclineRequest(r._id)}
-                          className="rounded-lg border border-red-500 px-3 py-2 text-xs text-red-700 hover:bg-red-50"
-                        >
-                          Decline
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section className="mx-auto w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-xl shadow-slate-950/40">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm text-slate-400">Motor Control Program</div>
-                  <div className="text-xs text-slate-500">
-                    Admin-based config with your ADMIN_ID
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <select
-                    value={espCodeType}
-                    onChange={(e) =>
-                      setEspCodeType(e.target.value as "arduino" | "micropython" | "esp8266" | "ttgo" | "stm32")
-                    }
-                    className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
-                  >
-                    <option value="arduino">ESP32 Arduino code</option>
-                    <option value="micropython">ESP32 MicroPython code</option>
-                    <option value="esp8266">ESP8266 Arduino code</option>
-                    <option value="ttgo">TTGO T-Call AM-036 (SIM800)</option>
-                    <option value="stm32">STM32 + SIM800L code</option>
-                  </select>
-                  <button
-                    onClick={copyEsp32Code}
-                    className="rounded-lg border border-cyan-500 px-3 py-1 text-xs text-cyan-200 hover:bg-cyan-800/40"
-                  >
-                    {codeCopied ? "Copied" : "Copy Code"}
-                  </button>
-                </div>
-              </div>
-              <pre className="mt-3 overflow-x-auto rounded-xl border border-slate-700 bg-black p-3 text-xs text-green-300">
-{esp32Code}
-              </pre>
-            </section>
+            <AdminFirmwareCodeSection
+              espCodeType={espCodeType}
+              onEspCodeTypeChange={setEspCodeType}
+              onCopyCode={copyEsp32Code}
+              codeCopied={codeCopied}
+              esp32Code={esp32Code}
+            />
           </>
         )}
       </div>

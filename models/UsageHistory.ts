@@ -21,7 +21,7 @@ export interface UsageHistoryDocument extends mongoose.Document {
   addedMinutes?: number;
   event: UsageEvent;
   date: Date;
-  meta?: Record<string, any>;
+  meta?: Record<string, unknown>;
 }
 
 const usageHistorySchema = new Schema<UsageHistoryDocument>(

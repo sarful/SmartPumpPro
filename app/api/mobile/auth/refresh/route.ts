@@ -86,6 +86,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       accessToken: createAccessToken({
         sub: session.userId,
+        sid: session._id.toString(),
         role: session.role,
         username: session.username,
         adminId: session.adminId,

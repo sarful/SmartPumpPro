@@ -80,7 +80,7 @@ export async function GET(_req: NextRequest) {
       availableMinutes: user.availableMinutes ?? 0,
       queuePosition,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('User me error:', error);
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: message, details: String(error) }, { status: 500 });

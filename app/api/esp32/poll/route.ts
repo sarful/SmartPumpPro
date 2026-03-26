@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '@/lib/auth';
 import { connectDB } from '@/lib/mongodb';
 import User from '@/models/User';
 import Admin from '@/models/Admin';
@@ -9,6 +10,12 @@ import { activateLoadShedding, clearLoadShedding } from '@/lib/loadshedding-engi
 import { isDeviceOnline, isDeviceReadyEffective } from '@/lib/device-readiness';
 import { logReadinessTransitions } from '@/lib/usage-logger';
 import { billCardModeFloorMinutes, finalizeCardModeSession, normalizeRfidUid } from '@/lib/card-mode';
+import {
+  getDeviceSecretHeaderName,
+  isAuthorizedDeviceRequest,
+  isDeviceSecretConfigured,
+} from '@/lib/device-auth';
+import { reportIncident } from '@/lib/observability';
 
 const BAD_REQUEST = { error: 'adminId is required' };
 
@@ -22,7 +29,7 @@ type AdminSnapshot = {
   deviceLastSeenAt?: Date | null;
   cardModeActive?: boolean;
   cardActiveUid?: string | null;
-  cardActiveUserId?: any;
+  cardActiveUserId?: string | { toString(): string } | null;
   cardActivatedAt?: Date | null;
   cardLastSeenAt?: Date | null;
   cardBilledMinutes?: number;
@@ -39,8 +46,44 @@ export async function GET(req: NextRequest) {
   const uid = normalizeRfidUid(uidRaw ?? undefined);
   const lsParam = searchParams.get('ls'); // optional: ESP32 sensed load-shedding (true/1)
   const devParam = searchParams.get('dev') ?? searchParams.get('device'); // optional: ESP32 device-ready pin (true/1)
+  const isReadOnlyRequest = lsParam === null && devParam === null && !uidProvided;
 
   try {
+    const deviceAuthorized = isDeviceSecretConfigured() && isAuthorizedDeviceRequest(req);
+
+    if (!deviceAuthorized && isReadOnlyRequest) {
+      const session = await auth();
+      if (!session?.user?.role) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+
+      if (session.user.role === 'user') {
+        if (session.user.id !== userId || session.user.adminId !== adminId) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+      } else if (session.user.role === 'admin') {
+        if (session.user.adminId !== adminId) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+      }
+    } else if (!isDeviceSecretConfigured()) {
+      return NextResponse.json(
+        {
+          error: 'ESP32 device auth is not configured',
+          details: 'Set ESP32_DEVICE_SECRET on the server before connecting devices.',
+        },
+        { status: 503 },
+      );
+    } else if (!deviceAuthorized) {
+      return NextResponse.json(
+        {
+          error: 'Unauthorized device request',
+          details: `Missing or invalid ${getDeviceSecretHeaderName()} header.`,
+        },
+        { status: 401 },
+      );
+    }
+
     await connectDB();
     // Run one tick to decrement timers and auto-stop if needed
     await tickRunningMotors();
@@ -169,6 +212,23 @@ export async function GET(req: NextRequest) {
           motorStatus: 'OFF',
           remainingMinutes: 0,
           availableMinutes: 0,
+          loadShedding: effectiveLoadShedding,
+          deviceReady: effectiveDeviceReady,
+        });
+      }
+
+      // Hard block RFID until the ESP32 reports ready again.
+      if (!effectiveDeviceReady || effectiveLoadShedding) {
+        if (admin?.cardModeActive) {
+          await finalizeCardModeSession({ adminId: adminLookupId, reason: 'admin_override' });
+        }
+        return NextResponse.json({
+          error: !effectiveDeviceReady ? 'Device not ready' : 'Load shedding active now',
+          cardModeActive: false,
+          cardModeMessage: !effectiveDeviceReady ? 'Device not ready' : 'Load shedding active now',
+          motorStatus: 'OFF',
+          remainingMinutes: 0,
+          availableMinutes: cardUser.availableMinutes ?? 0,
           loadShedding: effectiveLoadShedding,
           deviceReady: effectiveDeviceReady,
         });
@@ -335,13 +395,30 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      const finalUser = await User.findById(cardUser._id)
+      let finalUser = await User.findById(cardUser._id)
         .select({ motorStatus: 1, motorRunningTime: 1, availableMinutes: 1, adminId: 1, username: 1, status: 1 })
         .lean();
 
+      if (finalUser && finalUser.motorStatus !== 'RUNNING') {
+        await User.updateOne(
+          { _id: cardUser._id },
+          {
+            $set: {
+              motorStatus: 'RUNNING',
+              motorStartTime: new Date(),
+              motorRunningTime: finalUser.availableMinutes ?? 0,
+            },
+          },
+        ).exec();
+
+        finalUser = await User.findById(cardUser._id)
+          .select({ motorStatus: 1, motorRunningTime: 1, availableMinutes: 1, adminId: 1, username: 1, status: 1 })
+          .lean();
+      }
+
       return NextResponse.json({
         userId: finalUser?._id ?? cardUser._id,
-        motorStatus: finalUser?.motorStatus ?? 'OFF',
+        motorStatus: 'RUNNING',
         remainingMinutes: finalUser?.motorRunningTime ?? 0,
         availableMinutes: finalUser?.availableMinutes ?? 0,
         loadShedding: effectiveLoadShedding,
@@ -349,12 +426,40 @@ export async function GET(req: NextRequest) {
         cardModeActive: true,
         cardModeMessage: 'Now using card',
         cardActiveUser: cardUser.username,
+        cardActiveUserId: finalUser?._id ?? cardUser._id,
+        holdReason: null,
       });
     }
 
     // Card removed: end active session (ceil charge on removal).
     if (adminLookupId && uidProvided && !uid && admin?.cardModeActive) {
       await finalizeCardModeSession({ adminId: adminLookupId, reason: 'removed' });
+      admin = {
+        ...(admin || {}),
+        cardModeActive: false,
+        cardActiveUid: null,
+        cardActiveUserId: null,
+      };
+    }
+
+    if (adminLookupId && admin?.cardModeActive && !effectiveDeviceReady) {
+      await finalizeCardModeSession({ adminId: adminLookupId, reason: 'admin_override' });
+      admin = {
+        ...(admin || {}),
+        cardModeActive: false,
+        cardActiveUid: null,
+        cardActiveUserId: null,
+        cardModeMessage: 'Device not ready',
+      };
+    } else if (adminLookupId && admin?.cardModeActive && effectiveLoadShedding) {
+      await finalizeCardModeSession({ adminId: adminLookupId, reason: 'admin_override' });
+      admin = {
+        ...(admin || {}),
+        cardModeActive: false,
+        cardActiveUid: null,
+        cardActiveUserId: null,
+        cardModeMessage: 'Load shedding active now',
+      };
     }
 
     const runningQueue = await Queue.findOne({ adminId: adminLookupId, status: 'RUNNING' })
@@ -457,8 +562,20 @@ export async function GET(req: NextRequest) {
       estimatedWait: await estimateWait(freshUser.adminId.toString(), freshUser._id.toString()),
     });
   } catch (error) {
-    console.error('ESP32 poll error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    const requestId = await reportIncident({
+      error,
+      source: 'esp32_poll',
+      route: '/api/esp32/poll',
+      platform: 'device',
+      adminId: adminId ?? null,
+      ip: req.headers.get('x-forwarded-for'),
+      userAgent: req.headers.get('user-agent'),
+      meta: {
+        userId: userId ?? null,
+        uid: uid ?? null,
+      },
+    });
+    return NextResponse.json({ error: 'Internal server error', requestId }, { status: 500 });
   }
 }
 

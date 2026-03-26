@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
 import { connectDB } from '@/lib/mongodb';
 import User from '@/models/User';
+import { requireWebMutationSession } from '@/lib/web-mutation-auth';
 import { normalizeRfidUid } from '@/lib/card-mode';
 import { enforceRateLimit } from '@/lib/api-guard';
 import { logEvent } from '@/lib/usage-logger';
@@ -15,10 +15,9 @@ export async function POST(req: NextRequest) {
   const limited = enforceRateLimit(req, 'admin-rfid', 40, 60_000);
   if (limited) return limited;
 
-  const session = await auth();
-  if (!session || session.user.role !== 'admin') {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const authResult = await requireWebMutationSession(['admin']);
+  if (authResult.response) return authResult.response;
+  const { session } = authResult;
 
   let body: Body;
   try {

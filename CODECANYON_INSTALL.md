@@ -25,12 +25,12 @@ Minimum required:
 
 - `MONGODB_URI`
 - `NEXTAUTH_SECRET` (32+ chars)
-- `SEED_MASTER_PASSWORD` (for first seed)
-
-Recommended:
-
+- `MOBILE_JWT_SECRET` (32+ chars)
+- `ESP32_DEVICE_SECRET`
+- `CRON_SECRET`
 - `NEXTAUTH_URL`
 - `APP_BASE_URL`
+- `SEED_MASTER_PASSWORD` (for first seed)
 
 ## D. Install and Setup
 
@@ -64,6 +64,8 @@ npm run db:migrate
 npm run db:seed
 ```
 
+`npm run db:migrate` now also hashes any legacy plaintext account passwords before login.
+
 ## G. Common Errors
 
 1. `Missing MONGODB_URI`
@@ -75,7 +77,8 @@ npm run db:seed
 
 ## H. Security Baseline
 
-- Keep `ENABLE_PASSWORD_RESET_API=false` unless required.
+- Self-service password reset is disabled. Users must sign in and change passwords from their dashboard.
+- Web and mobile login now require bcrypt-hashed passwords; older plaintext records must be migrated before use.
 - Use strong secrets and unique DB credentials.
 - Never commit `.env.local` to git.
-
+- `npm run build`, `npm run start`, and `npm run install:check` fail if critical env values are missing or still use placeholder secrets.

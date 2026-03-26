@@ -5,7 +5,7 @@ import Admin from "@/models/Admin";
 import User from "@/models/User";
 import Queue from "@/models/Queue";
 import SystemState from "@/models/SystemState";
-import { isDeviceOnline, isDeviceReadyEffective } from "@/lib/device-readiness";
+import { getAdminRuntimeState, getUserUseSource } from "@/lib/dashboard-runtime";
 
 type AdminLean = {
   _id: unknown;
@@ -34,7 +34,7 @@ type UserLean = {
 
 export async function GET(req: NextRequest) {
   try {
-    const payload = getMobileAccessPayload(req);
+    const payload = await getMobileAccessPayload(req);
     if (!payload) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (payload.role !== "master") {
       return NextResponse.json({ error: "Only master role is allowed" }, { status: 403 });
@@ -93,12 +93,13 @@ export async function GET(req: NextRequest) {
     );
     const usersWithAdmin = userList.map((user) => {
       const meta = adminMetaMap[String(user.adminId)];
-      const useSource =
-        meta?.cardModeActive && meta.cardActiveUserId === String(user._id)
-          ? "Card"
-          : user.motorStatus === "RUNNING"
-            ? "Web"
-            : "-";
+      const useSource = getUserUseSource({
+        userId: user._id,
+        motorStatus: user.motorStatus,
+        cardModeActive: meta?.cardModeActive,
+        cardActiveUserId: meta?.cardActiveUserId,
+        fallback: "-",
+      });
       return {
         id: String(user._id),
         username: user.username,
@@ -114,16 +115,19 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    const adminsList = adminList.map((admin) => ({
-      id: String(admin._id),
-      username: admin.username,
-      status: admin.status,
-      loadShedding: Boolean(admin.loadShedding) && isDeviceOnline(admin.deviceLastSeenAt),
-      deviceOnline: isDeviceOnline(admin.deviceLastSeenAt),
-      deviceReady: isDeviceReadyEffective(admin),
-      devicePinHigh: Boolean(admin.devicePinHigh),
-      suspendReason: admin.suspendReason ?? null,
-    }));
+    const adminsList = adminList.map((admin) => {
+      const runtime = getAdminRuntimeState(admin);
+      return {
+        id: String(admin._id),
+        username: admin.username,
+        status: admin.status,
+        loadShedding: runtime.effectiveLoadShedding,
+        deviceOnline: runtime.deviceOnline,
+        deviceReady: runtime.effectiveDeviceReady,
+        devicePinHigh: Boolean(admin.devicePinHigh),
+        suspendReason: admin.suspendReason ?? null,
+      };
+    });
 
     return NextResponse.json({
       overview: { adminCount, userCount, running, waiting },

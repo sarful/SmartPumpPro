@@ -2,6 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
+import { DashboardMessage } from "@/components/DashboardMessage";
+import { getErrorMessage } from "@/lib/error-message";
+import { MasterAdminsSection } from "@/components/master/MasterAdminsSection";
+import { MasterApprovalControl } from "@/components/master/MasterApprovalControl";
+import { MasterManagementForms } from "@/components/master/MasterManagementForms";
+import { MasterStatsGrid } from "@/components/master/MasterStatsGrid";
+import { MasterUsersSection } from "@/components/master/MasterUsersSection";
 
 type AdminRow = {
   _id: string;
@@ -40,10 +47,13 @@ export default function MasterDashboardPage() {
   const [newUser, setNewUser] = useState({ username: "", password: "", adminId: "" });
   const [internetOnline, setInternetOnline] = useState(true);
 
-  const loadData = async () => {
+  const loadData = async (options?: { silent?: boolean }) => {
     if (!isMaster) return;
-    setLoading(true);
-    setError(null);
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const [adminsRes, usersRes, overviewRes] = await Promise.all([
         fetch("/api/master/admins"),
@@ -65,16 +75,25 @@ export default function MasterDashboardPage() {
       if (settingsRes.ok) {
         setManualAdminApproval(Boolean(settingsJson.manualAdminApproval));
       }
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Failed to load data");
+    } catch (err) {
+      if (!silent) {
+        setError(getErrorMessage(err, "Failed to load data"));
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
   const updateApprovalMode = async (value: boolean) => {
     setSavingApprovalMode(true);
     setError(null);
+    const nextLabel = value ? "manual approval" : "auto approval";
+    if (!window.confirm(`Switch admin approval mode to ${nextLabel}?`)) {
+      setSavingApprovalMode(false);
+      return;
+    }
     try {
       const res = await fetch("/api/master/settings", {
         method: "POST",
@@ -87,8 +106,8 @@ export default function MasterDashboardPage() {
         return;
       }
       setManualAdminApproval(Boolean(json.manualAdminApproval));
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Failed to update approval mode");
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to update approval mode"));
     } finally {
       setSavingApprovalMode(false);
     }
@@ -96,6 +115,14 @@ export default function MasterDashboardPage() {
 
   useEffect(() => {
     if (status === "authenticated" && isMaster) loadData();
+  }, [status, isMaster]);
+
+  useEffect(() => {
+    if (status !== "authenticated" || !isMaster) return;
+    const intervalId = setInterval(() => {
+      loadData({ silent: true });
+    }, 5000);
+    return () => clearInterval(intervalId);
   }, [status, isMaster]);
 
   useEffect(() => {
@@ -135,6 +162,7 @@ export default function MasterDashboardPage() {
 
   const deleteAdmin = async (id: string) => {
     setError(null);
+    if (!window.confirm("Delete this admin permanently?")) return;
     const res = await fetch(`/api/master/admins/${id}`, { method: "DELETE" });
     const json = await res.json();
     if (!res.ok) return setError(json.error || "Delete admin failed");
@@ -143,6 +171,7 @@ export default function MasterDashboardPage() {
 
   const suspendAdmin = async (id: string) => {
     setError(null);
+    if (!window.confirm("Suspend this admin?")) return;
     const reason = prompt("Suspend reason?") ?? "";
     const res = await fetch("/api/master/admins/suspend", {
       method: "POST",
@@ -181,6 +210,7 @@ export default function MasterDashboardPage() {
 
   const deleteUser = async (id: string) => {
     setError(null);
+    if (!window.confirm("Delete this user permanently?")) return;
     const res = await fetch(`/api/master/users/${id}`, { method: "DELETE" });
     const json = await res.json();
     if (!res.ok) return setError(json.error || "Delete user failed");
@@ -189,6 +219,7 @@ export default function MasterDashboardPage() {
 
   const suspendUser = async (id: string) => {
     setError(null);
+    if (!window.confirm("Suspend this user?")) return;
     const reason = prompt("Suspend reason?") ?? "";
     const res = await fetch("/api/master/users/suspend", {
       method: "POST",
@@ -262,6 +293,7 @@ export default function MasterDashboardPage() {
 
   const stopResetUserMotor = async (id: string) => {
     setError(null);
+    if (!window.confirm("Stop and reset this user's motor session?")) return;
     const res = await fetch("/api/master/users/motor-action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -292,8 +324,8 @@ export default function MasterDashboardPage() {
         setRfidMessage("RFID assigned");
       }
       loadData();
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : "RFID update failed");
+    } catch (err) {
+      setError(getErrorMessage(err, "RFID update failed"));
     } finally {
       setRfidLoading(false);
     }
@@ -335,6 +367,12 @@ export default function MasterDashboardPage() {
             >
               Download History
             </a>
+            <a
+              href="/master/change-password"
+              className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-slate-400 hover:text-slate-900"
+            >
+              Change Password
+            </a>
             <button
               onClick={() => signOut({ callbackUrl: "/admin/login" })}
               className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-slate-400 hover:text-slate-900"
@@ -344,334 +382,69 @@ export default function MasterDashboardPage() {
           </div>
         </header>
 
-        {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </div>
-        )}
+        {loading ? (
+          <DashboardMessage
+            variant="info"
+            title="Loading dashboard"
+            message="We are syncing admins, users, approval state, and system controls."
+          />
+        ) : null}
 
-        {overview && (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard title="Admins" value={overview.adminCount} />
-            <StatCard title="Users" value={overview.userCount} />
-            <StatCard title="Running" value={overview.running} />
-            <StatCard title="Waiting" value={overview.waiting} />
-          </div>
-        )}
+        {error ? <DashboardMessage variant="error" title="Dashboard error" message={error} actionLabel="Retry" onAction={loadData} /> : null}
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="text-sm text-slate-600">Admin Approval Control</div>
-              <div className="text-xs text-slate-500">
-                ON = new admins stay pending and need master approval. OFF = auto approve new admins.
-              </div>
-            </div>
-            <button
-              onClick={() => updateApprovalMode(!manualAdminApproval)}
-              disabled={savingApprovalMode}
-              className={`rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 ${
-                manualAdminApproval ? "bg-amber-600 hover:bg-amber-500" : "bg-emerald-600 hover:bg-emerald-500"
-              }`}
-            >
-              {savingApprovalMode
-                ? "Saving..."
-                : manualAdminApproval
-                  ? "ON (Manual approval)"
-                  : "OFF (Auto approval)"}
-            </button>
-          </div>
-        </section>
+        {overview ? <MasterStatsGrid overview={overview} /> : null}
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-sm text-slate-600">All Admins</div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            {allAdmins.map((ad) => (
-              <div key={ad._id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900">
-                <div className="font-semibold">{ad.username}</div>
-                <div className="text-slate-600 text-xs">
-                  Status: {ad.status}
-                  {ad.suspendReason ? ` (${ad.suspendReason})` : ""}
-                </div>
-                <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
-                  <span className="font-medium">Admin ID:</span>
-                  <code className="rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">
-                    {ad._id}
-                  </code>
-                  <button
-                    onClick={() => copyAdminId(ad._id)}
-                    className="rounded border border-slate-300 bg-white px-2 py-0.5 text-[11px] text-slate-700 hover:bg-slate-100"
-                  >
-                    {copiedAdminId === ad._id ? "Copied" : "Copy"}
-                  </button>
-                </div>
-                {(() => {
-                  const displayLoadShedding = Boolean(ad.loadShedding) || ad.deviceReady === false;
-                  const displayInternetOnline =
-                    internetOnline && ad.deviceReady !== false && ad.deviceOnline !== false;
-                  return (
-                    <div className="mt-2 grid gap-1 text-xs">
-                      <div className="rounded-md border border-slate-200 bg-white px-2 py-1 text-slate-700">
-                        Device:{" "}
-                        <span className={`inline-flex items-center gap-1 font-semibold ${ad.deviceReady === false ? "text-red-700" : "text-emerald-700"}`}>
-                          <span className={`h-2 w-2 rounded-full ${ad.deviceReady === false ? "bg-red-500" : "bg-emerald-500"}`} />
-                          {ad.deviceReady === false ? "Not Ready" : "Ready"}
-                        </span>
-                      </div>
-                      <div className="rounded-md border border-slate-200 bg-white px-2 py-1 text-slate-700">
-                        Loadshedding:{" "}
-                        <span className={`inline-flex items-center gap-1 font-semibold ${displayLoadShedding ? "text-red-700" : "text-emerald-700"}`}>
-                          <span className={`h-2 w-2 rounded-full ${displayLoadShedding ? "bg-red-500" : "bg-emerald-500"}`} />
-                          {displayLoadShedding ? "Yes" : "No"}
-                        </span>
-                      </div>
-                      <div className="rounded-md border border-slate-200 bg-white px-2 py-1 text-slate-700">
-                        Internet:{" "}
-                        <span className={`inline-flex items-center gap-1 font-semibold ${displayInternetOnline ? "text-emerald-700" : "text-red-700"}`}>
-                          <span className={`h-2 w-2 rounded-full ${displayInternetOnline ? "bg-emerald-500" : "bg-red-500"}`} />
-                          {displayInternetOnline ? "Online" : "Offline"}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })()}
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {ad.status === "suspended" ? (
-                    <button
-                      onClick={() => unsuspendAdmin(ad._id)}
-                      className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs text-emerald-700 hover:bg-emerald-100"
-                    >
-                      Unsuspend
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => suspendAdmin(ad._id)}
-                      className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1 text-xs text-amber-700 hover:bg-amber-100"
-                    >
-                      Suspend
-                    </button>
-                  )}
-                  <button
-                    onClick={() => deleteAdmin(ad._id)}
-                    className="rounded-lg border border-red-300 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ))}
-            {allAdmins.length === 0 && <div className="text-sm text-slate-500">No admins.</div>}
-          </div>
-        </section>
+        <MasterApprovalControl
+          manualAdminApproval={manualAdminApproval}
+          savingApprovalMode={savingApprovalMode}
+          onToggle={() => updateApprovalMode(!manualAdminApproval)}
+        />
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-sm text-slate-600">All Users</div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {allUsers.map((u) => (
-              <div key={u._id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900">
-                <div className="font-semibold">{u.username}</div>
-                <div className="text-slate-600 text-xs">Admin: {u.adminName ?? u.adminId}</div>
-                <div className="text-slate-600 text-xs break-all">RFID: {u.rfidUid || "-"}</div>
-                <div className="text-slate-600 text-xs">Balance: {u.availableMinutes ?? 0} m</div>
-                <div className="text-slate-600 text-xs">Motor: {u.motorStatus ?? "OFF"}</div>
-                <div className="text-slate-600 text-xs">Running Time: {u.motorRunningTime ?? 0} m</div>
-                <div className="text-slate-600 text-xs">Use: {u.useSource ?? "-"}</div>
-                <div className="text-slate-600 text-xs">
-                  Status: {u.status ?? "active"}
-                  {u.suspendReason ? ` (${u.suspendReason})` : ""}
-                </div>
-                <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                  <input
-                    type="number"
-                    min={0}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 sm:w-28"
-                    placeholder="minutes"
-                    value={minuteDrafts[u._id] ?? String(u.availableMinutes ?? 0)}
-                    onChange={(e) =>
-                      setMinuteDrafts((prev) => ({ ...prev, [u._id]: e.target.value }))
-                    }
-                  />
-                  <button
-                    onClick={() => {
-                      const value = Number(minuteDrafts[u._id] ?? u.availableMinutes ?? 0);
-                      if (!Number.isFinite(value) || value <= 0) return setError("Recharge minutes must be > 0");
-                      rechargeUserMinutes(u._id, value);
-                    }}
-                    className="w-full rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs text-emerald-700 hover:bg-emerald-100 sm:w-auto"
-                  >
-                    Recharge
-                  </button>
-                  <button
-                    onClick={() => {
-                      const value = Number(minuteDrafts[u._id] ?? u.availableMinutes ?? 0);
-                      if (!Number.isFinite(value) || value < 0) return setError("Set minutes must be >= 0");
-                      setUserAvailableMinutes(u._id, Math.floor(value));
-                    }}
-                    className="w-full rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1 text-xs text-indigo-700 hover:bg-indigo-100 sm:w-auto"
-                  >
-                    Set Balance
-                  </button>
-                  <button
-                    onClick={() => startUserMotor(u._id, u.motorRunningTime && u.motorRunningTime > 0 ? u.motorRunningTime : 5)}
-                    className="w-full rounded-lg border border-blue-300 bg-blue-50 px-3 py-1 text-xs text-blue-700 hover:bg-blue-100 sm:w-auto"
-                  >
-                    Start Motor
-                  </button>
-                  <button
-                    onClick={() => stopResetUserMotor(u._id)}
-                    className="w-full rounded-lg border border-slate-300 bg-slate-100 px-3 py-1 text-xs text-slate-800 hover:bg-slate-200 sm:w-auto"
-                  >
-                    Stop/Reset
-                  </button>
-                  {u.status === "suspended" ? (
-                    <button
-                      onClick={() => unsuspendUser(u._id)}
-                      className="w-full rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs text-emerald-700 hover:bg-emerald-100 sm:w-auto"
-                    >
-                      Unsuspend
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => suspendUser(u._id)}
-                      className="w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-1 text-xs text-amber-700 hover:bg-amber-100 sm:w-auto"
-                    >
-                      Suspend
-                    </button>
-                  )}
-                  <button
-                    onClick={() => deleteUser(u._id)}
-                    className="w-full rounded-lg border border-red-300 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100 sm:w-auto"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ))}
-            {allUsers.length === 0 && <div className="text-sm text-slate-500">No users.</div>}
-          </div>
-        </section>
+        <MasterAdminsSection
+          admins={allAdmins}
+          copiedAdminId={copiedAdminId}
+          internetOnline={internetOnline}
+          onCopyAdminId={copyAdminId}
+          onSuspendAdmin={suspendAdmin}
+          onUnsuspendAdmin={unsuspendAdmin}
+          onDeleteAdmin={deleteAdmin}
+        />
 
-        <section className="grid gap-4 lg:grid-cols-3">
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="text-sm text-slate-600">Create Admin</div>
-            <input
-              className="mt-3 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-              placeholder="username"
-              value={newAdmin.username}
-              onChange={(e) => setNewAdmin((p) => ({ ...p, username: e.target.value }))}
-            />
-            <input
-              type="password"
-              className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-              placeholder="password (min 6)"
-              value={newAdmin.password}
-              onChange={(e) => setNewAdmin((p) => ({ ...p, password: e.target.value }))}
-            />
-            <select
-              className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-              value={newAdmin.status}
-              onChange={(e) => setNewAdmin((p) => ({ ...p, status: e.target.value }))}
-            >
-              <option value="pending">pending</option>
-              <option value="active">active</option>
-            </select>
-            <button
-              onClick={createAdmin}
-              className="mt-3 w-full rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
-            >
-              Create Admin
-            </button>
-          </div>
+        <MasterUsersSection
+          users={allUsers}
+          minuteDrafts={minuteDrafts}
+          onMinuteDraftChange={(userId, value) =>
+            setMinuteDrafts((prev) => ({ ...prev, [userId]: value }))
+          }
+          onRechargeUserMinutes={rechargeUserMinutes}
+          onSetUserAvailableMinutes={setUserAvailableMinutes}
+          onStartUserMotor={startUserMotor}
+          onStopResetUserMotor={stopResetUserMotor}
+          onSuspendUser={suspendUser}
+          onUnsuspendUser={unsuspendUser}
+          onDeleteUser={deleteUser}
+          onSetError={setError}
+        />
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="text-sm text-slate-600">Create User</div>
-            <input
-              className="mt-3 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-              placeholder="username"
-              value={newUser.username}
-              onChange={(e) => setNewUser((p) => ({ ...p, username: e.target.value }))}
-            />
-            <input
-              type="password"
-              className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-              placeholder="password (min 6)"
-              value={newUser.password}
-              onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))}
-            />
-            <select
-              className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-              value={newUser.adminId}
-              onChange={(e) => setNewUser((p) => ({ ...p, adminId: e.target.value }))}
-            >
-              <option value="">Select admin</option>
-              {admins.map((a) => (
-                <option key={a._id} value={a._id}>
-                  {a.username} ({a.status})
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={createUser}
-              className="mt-3 w-full rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
-              disabled={!newUser.adminId}
-            >
-              Create User
-            </button>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="text-sm text-slate-600">RFID Card Registration</div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <select
-                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-                value={rfidTarget}
-                onChange={(e) => setRfidTarget(e.target.value)}
-              >
-                <option value="">Select user</option>
-              {allUsers.map((u) => (
-                <option key={u._id} value={u._id}>
-                  {u.username}
-                  {u.rfidUid ? ` [${u.rfidUid}]` : ""}
-                  {` (${u.adminName ?? u.adminId})`}
-                </option>
-              ))}
-            </select>
-              <input
-                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 uppercase"
-                placeholder="RFID UID (UPPERCASE)"
-                value={rfidUid}
-                onChange={(e) => setRfidUid(e.target.value.toUpperCase())}
-              />
-            </div>
-            <div className="mt-3 flex gap-2">
-              <button
-                onClick={() => assignRfid(false)}
-                disabled={rfidLoading || !rfidTarget || !rfidUid.trim()}
-                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60"
-              >
-                {rfidLoading ? "Assigning..." : "Assign"}
-              </button>
-              <button
-                onClick={() => assignRfid(true)}
-                disabled={rfidLoading || !rfidTarget}
-                className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-              >
-                Clear
-              </button>
-              {rfidMessage && <span className="self-center text-xs text-emerald-600">{rfidMessage}</span>}
-            </div>
-          </div>
-        </section>
+        <MasterManagementForms
+          newAdmin={newAdmin}
+          onNewAdminChange={setNewAdmin}
+          onCreateAdmin={createAdmin}
+          newUser={newUser}
+          admins={admins}
+          onNewUserChange={setNewUser}
+          onCreateUser={createUser}
+          rfidTarget={rfidTarget}
+          rfidUid={rfidUid}
+          allUsers={allUsers}
+          rfidLoading={rfidLoading}
+          rfidMessage={rfidMessage}
+          onRfidTargetChange={setRfidTarget}
+          onRfidUidChange={setRfidUid}
+          onAssignRfid={assignRfid}
+        />
 
       </div>
-    </div>
-  );
-}
-
-function StatCard({ title, value }: { title: string; value: number }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="text-sm text-slate-500">{title}</div>
-      <div className="mt-2 text-4xl font-semibold text-slate-900">{value}</div>
     </div>
   );
 }
