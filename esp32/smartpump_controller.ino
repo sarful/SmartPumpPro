@@ -82,7 +82,7 @@ Motor Relay      -> GPIO25
 #define POLL_INTERVAL 5000UL
 #define FAIL_TIMEOUT  15000UL
 #define RFID_DEBOUNCE_MS 3000UL
-#define LOAD_ACTIVE_LOW 0
+#define LOAD_ACTIVE_LOW 1
 #define DEVICE_READY_ACTIVE_LOW 0
 
 const char* API_URL = "https://pms.mechatronicslab.net/api/esp32/poll";
@@ -216,7 +216,7 @@ void pollServer(const String& uid = "") {
       if (uid.length()) {
         lcd.print(String(cardMessage).substring(0, 16));
       } else {
-        lcd.print(modem.isGprsConnected() ? "NET OK " : "NET FAIL");
+        lcd.print(WiFi.status() == WL_CONNECTED ? "NET OK " : "NET FAIL");
         lcd.print(" ");
         lcd.print(backendLS ? "LS" : "OK");
       }

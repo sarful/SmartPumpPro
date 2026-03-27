@@ -7,7 +7,7 @@
 // ======================================
 
 #include <WiFiManager.h>
-#include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
@@ -19,14 +19,18 @@
 // ===== TIMING =====
 #define POLL_INTERVAL_MS 5000
 #define HTTP_TIMEOUT_MS 4000
+#define FAILSAFE_TIMEOUT_MS 15000UL
+#define LOAD_ACTIVE_LOW 1
+#define DEVICE_READY_ACTIVE_LOW 0
 
 // ===== YOUR CONFIG =====
 const char* ADMIN_ID = "PUT_YOUR_ADMIN_ID_HERE";       // e.g. 69a40837b2e2acccfbe8c476
-const char* API_HOST = "http://192.168.2.101:3000";    // Use server LAN IP for ESP32, not localhost
+const char* API_URL = "https://pms.mechatronicslab.net/api/esp32/poll";
 const char* DEVICE_KEY = "PUT_YOUR_ESP32_DEVICE_SECRET_HERE";
 
 // ===== GLOBAL =====
 unsigned long lastPoll = 0;
+unsigned long lastSuccess = 0;
 
 // -------- Motor Control --------
 void setMotor(bool on) {
@@ -51,13 +55,14 @@ void ensureWiFi() {
 void pollServer() {
   if (WiFi.status() != WL_CONNECTED) return;
 
-  bool localLS = digitalRead(LOAD_PIN) == HIGH;
-  bool localDeviceReady = digitalRead(DEVICE_PIN) == HIGH;
+  bool localLS = LOAD_ACTIVE_LOW ? (digitalRead(LOAD_PIN) == LOW) : (digitalRead(LOAD_PIN) == HIGH);
+  bool localDeviceReady = DEVICE_READY_ACTIVE_LOW ? (digitalRead(DEVICE_PIN) == LOW) : (digitalRead(DEVICE_PIN) == HIGH);
 
-  WiFiClient client;
+  WiFiClientSecure client;
+  client.setInsecure();
   HTTPClient http;
 
-  String url = String(API_HOST) + "/api/esp32/poll?adminId=" + ADMIN_ID +
+  String url = String(API_URL) + "?adminId=" + ADMIN_ID +
                "&ls=" + (localLS ? "1" : "0") +
                "&dev=" + (localDeviceReady ? "1" : "0");
 
@@ -88,16 +93,25 @@ void pollServer() {
 
   const char* status       = doc["motorStatus"] | "OFF";
   bool loadSheddingServer  = doc["loadShedding"] | false;
+  bool deviceReadyServer   = doc["deviceReady"] | false;
   const char* adminName    = doc["adminName"] | "unknown";
 
-  Serial.printf("[POLL] admin=%s status=%s lsServer=%d lsLocal=%d dev=%d\n",
-                adminName, status, loadSheddingServer, localLS, localDeviceReady);
+  Serial.printf("[POLL] admin=%s status=%s lsServer=%d lsLocal=%d devLocal=%d devServer=%d\n",
+                adminName, status, loadSheddingServer, localLS, localDeviceReady, deviceReadyServer);
 
   bool turnOn = strcmp(status, "RUNNING") == 0 &&
                 !loadSheddingServer &&
                 !localLS &&
-                localDeviceReady;
+                localDeviceReady &&
+                deviceReadyServer;
   setMotor(turnOn);
+  lastSuccess = millis();
+}
+
+void failSafe() {
+  if (millis() - lastSuccess > FAILSAFE_TIMEOUT_MS) {
+    setMotor(false);
+  }
 }
 
 // -------- Setup --------
@@ -131,5 +145,6 @@ void loop() {
     pollServer();
   }
 
+  failSafe();
   delay(10);
 }
