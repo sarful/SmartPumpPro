@@ -45,10 +45,16 @@ export async function tickUnifiedMotorSessions(): Promise<void> {
 
     const decrement = Math.min(delta, remainingBefore);
     const remainingAfter = Math.max(remainingBefore - decrement, 0);
+    const runningFilter = {
+      _id: user._id,
+      motorStatus: 'RUNNING',
+      motorStartTime: user.motorStartTime,
+      motorRunningTime: remainingBefore,
+    };
 
     if (isCardModeUser) {
       if (remainingAfter <= MIN_RUNTIME_THRESHOLD) {
-        await User.findByIdAndUpdate(user._id, {
+        const thresholdResult = await User.updateOne(runningFilter, {
           $set: {
             availableMinutes: remainingAfter,
             motorRunningTime: remainingAfter,
@@ -56,9 +62,10 @@ export async function tickUnifiedMotorSessions(): Promise<void> {
             motorStartTime: user.motorStartTime,
           },
         }).exec();
+        if (thresholdResult.modifiedCount === 0) continue;
         await finalizeCardModeSession({ adminId: user.adminId, reason: 'insufficient' });
       } else {
-        await User.findByIdAndUpdate(user._id, {
+        const cardUpdateResult = await User.updateOne(runningFilter, {
           $set: {
             availableMinutes: remainingAfter,
             motorRunningTime: remainingAfter,
@@ -66,12 +73,13 @@ export async function tickUnifiedMotorSessions(): Promise<void> {
             motorStartTime: user.motorStartTime,
           },
         }).exec();
+        if (cardUpdateResult.modifiedCount === 0) continue;
       }
       continue;
     }
 
     if (remainingAfter <= MIN_RUNTIME_THRESHOLD) {
-      await User.findByIdAndUpdate(user._id, {
+      const stopResult = await User.updateOne(runningFilter, {
         $inc: { availableMinutes: remainingAfter },
         $set: {
           motorRunningTime: 0,
@@ -80,6 +88,7 @@ export async function tickUnifiedMotorSessions(): Promise<void> {
           lastSetMinutes: 0,
         },
       }).exec();
+      if (stopResult.modifiedCount === 0) continue;
 
       await Queue.findOneAndUpdate(
         { adminId: user.adminId, userId: user._id, status: 'RUNNING' },
@@ -97,13 +106,14 @@ export async function tickUnifiedMotorSessions(): Promise<void> {
       continue;
     }
 
-    await User.findByIdAndUpdate(user._id, {
+    const runningUpdateResult = await User.updateOne(runningFilter, {
       $set: {
         motorRunningTime: remainingAfter,
         motorStatus: 'RUNNING',
         motorStartTime: user.motorStartTime,
       },
     }).exec();
+    if (runningUpdateResult.modifiedCount === 0) continue;
   }
 }
 
