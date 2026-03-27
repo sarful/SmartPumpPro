@@ -1737,7 +1737,7 @@ void loop() {
               Manage users, wallet recharges, load shedding, and queue.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-center gap-2">
             <a
               href="/api/history?format=csv&download=1&limit=100"
               className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-cyan-400 hover:text-cyan-200"
