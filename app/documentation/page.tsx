@@ -1,6 +1,9 @@
 import Link from "next/link";
 
 const hardwareRows = [
+  ["ESP32", "GPIO25", "Relay input", "Motor control output"],
+  ["ESP32", "GPIO32", "Load-shedding sensor input", "Grid / load status detect"],
+  ["ESP32", "GPIO33", "Device-ready sensor input", "Device readiness detect"],
   ["ESP32", "GPIO5", "Optocoupler LED (+) via resistor", "Motor ON/OFF signal"],
   ["ESP32", "GND", "Optocoupler LED (-)", "Signal ground"],
   ["Optocoupler Output", "Collector", "Transistor Base (via 1k resistor)", "Isolation switching"],
@@ -10,7 +13,6 @@ const hardwareRows = [
   ["Relay Coil (+)", "+12V", "External power", "Relay supply"],
   ["Relay COM", "AC Line", "Motor input", "Switching line"],
   ["Relay NO", "Motor Phase", "Motor power control", "-"],
-  ["ESP32", "GPIO18 (example)", "Load Shedding input", "Grid status detect"],
 ];
 
 const sections = [
@@ -40,8 +42,8 @@ const sections = [
   },
   {
     title: "Wallet Engine Architecture",
-    body: "Minutes are deducted on actual usage. Early stop returns unused minutes. Recharge updates availableMinutes with audit logs.",
-    example: "Set 10m, stop at 6m -> used 6, refund 4.",
+    body: "Minutes are updated according to actual session activity and current safety rules. When a run ends, the final balance is recalculated automatically. Recharge updates availableMinutes with audit logs.",
+    example: "A user starts a run, uses the pump, and then stops. The system updates the final balance automatically.",
   },
   {
     title: "Smart Queue Engine Architecture",
@@ -50,17 +52,17 @@ const sections = [
   },
   {
     title: "Load Shedding Engine Design",
-    body: "Load shedding forces HOLD state, pauses decrement, and keeps remaining time intact for safe resume.",
-    example: "RUNNING 8m -> HOLD due to power loss -> resume from 8m on recovery.",
+    body: "Load shedding or device unavailability can force HOLD state, pause decrement, and keep remaining time intact for safe resume.",
+    example: "A RUNNING session moves to HOLD during interruption and resumes from the remaining time when conditions recover.",
   },
   {
     title: "Device Synchronization Engine",
-    body: "ESP32 polling syncs physical state with backend state every 3-5 seconds. Local load-shedding pin can also be sent to server.",
+    body: "ESP32 or supported device polling keeps the physical motor state aligned with backend state through regular requests. Device status, load shedding, and readiness signals are continuously reported to the server.",
   },
   {
     title: "ESP32 Firmware Architecture",
-    body: "Firmware has WiFi/GPRS connect, poll loop, JSON parser, and motor GPIO decision logic using motorStatus + loadShedding.",
-    example: "RUNNING + no LS => GPIO HIGH, otherwise GPIO LOW.",
+    body: "Firmware handles network connection, periodic polling, RFID scan flow where applicable, JSON response parsing, and GPIO-based motor control decisions using motor status, load shedding, and device readiness.",
+    example: "RUNNING + safe conditions => motor output ON, otherwise safe OFF or HOLD behavior.",
   },
   {
     title: "Hardware Integration & Electrical Protection Design",
@@ -86,8 +88,8 @@ const sections = [
   },
   {
     title: "Error Handling & Fail-Safe Strategy",
-    body: "API routes use try/catch and explicit JSON errors. On failures, motor-safe fallback is OFF/HOLD depending on state.",
-    example: "ESP32 non-200 response => keep safe OFF output.",
+    body: "API routes return explicit JSON errors and devices fall back to safe motor-off or HOLD behavior depending on the current safety state and connection health.",
+    example: "If a device cannot confirm a safe RUNNING state, the motor stays OFF until normal conditions return.",
   },
   {
     title: "Scalability & Performance Strategy",
@@ -99,7 +101,7 @@ const sections = [
   },
   {
     title: "Production Validation Checklist",
-    body: "Validate env vars, auth roles, suspend behavior, queue correctness, hold/resume, refund correctness, and ESP32 command response.",
+    body: "Validate env vars, auth roles, suspend behavior, queue correctness, hold/resume, balance update correctness, and ESP32 command response.",
   },
   {
     title: "Future Upgrade & Expansion Roadmap",
@@ -116,8 +118,15 @@ export default function DocumentationPage() {
         </p>
         <h1 className="mt-3 text-3xl font-semibold">Documentation</h1>
         <p className="mt-2 text-sm text-slate-600">
-          Quick technical documentation in simple language.
+          Quick technical documentation in simple buyer-friendly language.
         </p>
+
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <p className="font-medium text-slate-900">Best reading order</p>
+          <p className="mt-1">
+            Start with the Beginner Guide for daily usage, then read this page for system and technical overview.
+          </p>
+        </div>
 
         <div className="mt-8 space-y-3">
           {sections.map((section) => (
