@@ -14,7 +14,6 @@ Make `web` and `RFID` motor usage follow the same practical minute-deduction out
 - Added unified billing logic in [lib/timer-engine.ts](c:/Users/Lab/Desktop/smartpump/smartpump-pro/lib/timer-engine.ts)
 - Wired live billing updates through [app/api/esp32/poll/route.ts](c:/Users/Lab/Desktop/smartpump/smartpump-pro/app/api/esp32/poll/route.ts)
 - Reduced RFID-specific billing duplication in [lib/card-mode.ts](c:/Users/Lab/Desktop/smartpump/smartpump-pro/lib/card-mode.ts)
-- Kept [app/api/internal/tick/route.ts](c:/Users/Lab/Desktop/smartpump/smartpump-pro/app/api/internal/tick/route.ts) as compatibility only
 - Added request-driven unified billing calls to dashboard/mobile read routes
 - Typecheck passed locally
 
@@ -48,6 +47,18 @@ Status: `PASSED`
 
 Status: `PASSED`
 
+### HOLD / Resume
+
+- Verified on live behavior
+- Web mode now goes to `HOLD` when device/internet becomes unavailable
+- RFID mode now also goes to `HOLD` when device/internet becomes unavailable
+- Both modes resume to `RUNNING` when:
+  - device becomes ready again
+  - internet/polling becomes available again
+  - load shedding is no longer active
+
+Status: `PASSED`
+
 ## Regression Note
 
 - Commit `f0c9d7c` introduced a bad alignment patch that caused incorrect refund behavior
@@ -72,3 +83,4 @@ Status: `PASSED`
 - Unified billing refactor pushed
 - Regression patch pushed and reverted
 - Current live baseline confirmed stable
+- Cron compatibility retired; billing now depends on live request-driven paths only

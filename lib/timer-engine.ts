@@ -18,10 +18,6 @@ export function calculateUsedMinutes(startTime: Date | null, setMinutes: number)
   return Math.min(Math.max(elapsedMinutes, 0), Math.max(setMinutes, 0));
 }
 
-export async function tickRunningMotors(): Promise<void> {
-  await tickUnifiedMotorSessions();
-}
-
 export async function tickUnifiedMotorSessions(): Promise<void> {
   await connectDB();
   const now = Date.now();
@@ -109,10 +105,6 @@ export async function tickUnifiedMotorSessions(): Promise<void> {
       },
     }).exec();
   }
-}
-
-export async function tickCardModeBilling(): Promise<void> {
-  await tickUnifiedMotorSessions();
 }
 
 export async function stopMotorForUser(

@@ -10,9 +10,7 @@ test("calculateUsedMinutes floors elapsed runtime and caps at set minutes", asyn
     "@/lib/queue-engine": { startNextUser: async () => null },
     "@/models/Admin": {},
     "@/lib/card-mode": {
-      billCardModeFloorMinutes: async () => {},
       finalizeCardModeSession: async () => {},
-      getAdminCardMode: async () => null,
     },
   }, async ({ calculateUsedMinutes }) => {
     const sixMinutesAgo = new Date(Date.now() - 6.8 * 60 * 1000);
@@ -28,9 +26,7 @@ test("calculateUsedMinutes never exceeds the originally set minutes", async () =
     "@/lib/queue-engine": { startNextUser: async () => null },
     "@/models/Admin": {},
     "@/lib/card-mode": {
-      billCardModeFloorMinutes: async () => {},
       finalizeCardModeSession: async () => {},
-      getAdminCardMode: async () => null,
     },
   }, async ({ calculateUsedMinutes }) => {
     const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000);
@@ -46,9 +42,7 @@ test("calculateUsedMinutes returns zero for missing start time or invalid minute
     "@/lib/queue-engine": { startNextUser: async () => null },
     "@/models/Admin": {},
     "@/lib/card-mode": {
-      billCardModeFloorMinutes: async () => {},
       finalizeCardModeSession: async () => {},
-      getAdminCardMode: async () => null,
     },
   }, async ({ calculateUsedMinutes }) => {
     assert.equal(calculateUsedMinutes(null, 10), 0);

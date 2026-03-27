@@ -22,17 +22,12 @@ Required:
 - `NEXTAUTH_SECRET` (min 32 chars)
 - `MOBILE_JWT_SECRET` (min 32 chars, used for mobile tokens)
 - `ESP32_DEVICE_SECRET` (shared secret required by `/api/esp32/poll`)
-- `CRON_SECRET` (required by `/api/internal/tick`)
 - `NEXTAUTH_URL`
 - `APP_BASE_URL`
 
 Device note:
 
 - Every ESP32 firmware client must send the `x-device-key` header with the same `ESP32_DEVICE_SECRET` value.
-
-Scheduler note:
-
-- Every scheduler call to `/api/internal/tick` must send the `x-cron-key` header with the same `CRON_SECRET` value.
 
 Password note:
 

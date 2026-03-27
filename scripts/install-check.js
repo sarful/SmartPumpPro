@@ -6,7 +6,6 @@ const requiredEnv = [
   "MONGODB_URI",
   "NEXTAUTH_SECRET",
   "ESP32_DEVICE_SECRET",
-  "CRON_SECRET",
   "NEXTAUTH_URL",
   "APP_BASE_URL",
 ];
@@ -57,10 +56,6 @@ async function run() {
   const esp32Secret = readEnv("ESP32_DEVICE_SECRET");
   if (esp32Secret && looksLikePlaceholder(esp32Secret)) {
     failures.push("ESP32_DEVICE_SECRET must be replaced with a real secret");
-  }
-  const cronSecret = readEnv("CRON_SECRET");
-  if (cronSecret && looksLikePlaceholder(cronSecret)) {
-    failures.push("CRON_SECRET must be replaced with a real secret");
   }
 
   const mongoUri = readEnv("MONGODB_URI");

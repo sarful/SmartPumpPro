@@ -27,7 +27,6 @@ Minimum required:
 - `NEXTAUTH_SECRET` (32+ chars)
 - `MOBILE_JWT_SECRET` (32+ chars)
 - `ESP32_DEVICE_SECRET`
-- `CRON_SECRET`
 - `NEXTAUTH_URL`
 - `APP_BASE_URL`
 - `SEED_MASTER_PASSWORD` (for first seed)

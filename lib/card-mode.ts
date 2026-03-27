@@ -14,39 +14,6 @@ export function normalizeRfidUid(raw: string | null | undefined): string | null 
 const toObjectId = (id: string | Types.ObjectId): Types.ObjectId =>
   typeof id === 'string' ? new Types.ObjectId(id) : id;
 
-export async function getAdminCardMode(adminId: string | Types.ObjectId) {
-  await connectDB();
-  const adminObjectId = toObjectId(adminId);
-  return Admin.findById(adminObjectId)
-    .select({
-      cardModeActive: 1,
-      cardActiveUid: 1,
-      cardActiveUserId: 1,
-      cardActivatedAt: 1,
-      cardLastSeenAt: 1,
-      cardBilledMinutes: 1,
-      cardModeMessage: 1,
-      cardModeStopReason: 1,
-    })
-    .lean();
-}
-
-export async function billCardModeFloorMinutes(params: {
-  adminId: string | Types.ObjectId;
-  now?: Date;
-}): Promise<{ billedDelta: number; availableMinutes?: number } | null> {
-  await connectDB();
-  const adminObjectId = toObjectId(params.adminId);
-
-  const admin = await Admin.findById(adminObjectId)
-    .select({ cardModeActive: 1, cardActiveUserId: 1, cardActivatedAt: 1, cardBilledMinutes: 1 })
-    .lean();
-  if (!admin?.cardModeActive || !admin.cardActiveUserId) return null;
-
-  const user = await User.findById(admin.cardActiveUserId).select({ availableMinutes: 1 }).lean();
-  return { billedDelta: 0, availableMinutes: user?.availableMinutes ?? 0 };
-}
-
 export async function finalizeCardModeSession(params: {
   adminId: string | Types.ObjectId;
   reason: CardModeStopReason;

@@ -1,7 +1,7 @@
 # PumpPilot Manual Test Plan
 
 ## Prereqs
-- `.env.local` set with `MONGODB_URI`, `NEXTAUTH_SECRET`, `MOBILE_JWT_SECRET`, `ESP32_DEVICE_SECRET`, `CRON_SECRET`, `NEXTAUTH_URL`, and `APP_BASE_URL`.
+- `.env.local` set with `MONGODB_URI`, `NEXTAUTH_SECRET`, `MOBILE_JWT_SECRET`, `ESP32_DEVICE_SECRET`, `NEXTAUTH_URL`, and `APP_BASE_URL`.
 - Run `npm install` then `npm run dev`.
 
 ## Flow 1: Admin registration and approval
@@ -31,7 +31,6 @@
 - Minute-request dedupe: first request succeeds, second pending request from web or mobile returns `400` with `Pending request already exists`
 - `POST /api/auth/change-password` while signed out -> `401`; with wrong current password -> `400`; with valid current password and new password -> success
 - Mobile `POST /api/mobile/auth/logout` or `POST /api/mobile/auth/logout-all` -> the previous access token should fail on the next protected mobile API call with `401`
-- `GET /api/internal/tick` without `x-cron-key` -> `401`, with missing `CRON_SECRET` -> `503`, with valid `x-cron-key` -> `{ ok: true }`
 - `npm run install:check` -> fails if critical env values are missing or still use placeholders
 - `GET /api/health/db` → `{ ok: true }`
 - `GET /api/health/queue` → queue counts

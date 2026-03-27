@@ -43,14 +43,12 @@ function run() {
   const nextAuthSecret = readEnv("NEXTAUTH_SECRET");
   const mobileJwtSecret = readEnv("MOBILE_JWT_SECRET");
   const esp32Secret = readEnv("ESP32_DEVICE_SECRET");
-  const cronSecret = readEnv("CRON_SECRET");
   const nextAuthUrl = readEnv("NEXTAUTH_URL");
   const appBaseUrl = readEnv("APP_BASE_URL");
 
   if (!mongoUri) failures.push("Missing required env: MONGODB_URI");
   if (!nextAuthSecret) failures.push("Missing required env: NEXTAUTH_SECRET");
   if (!esp32Secret) failures.push("Missing required env: ESP32_DEVICE_SECRET");
-  if (!cronSecret) failures.push("Missing required env: CRON_SECRET");
 
   if (nextAuthSecret && nextAuthSecret.length < 32) {
     failures.push("NEXTAUTH_SECRET must be at least 32 characters");
@@ -64,9 +62,6 @@ function run() {
 
   if (looksLikePlaceholder(esp32Secret)) {
     failures.push("ESP32_DEVICE_SECRET must be replaced with a real secret");
-  }
-  if (looksLikePlaceholder(cronSecret)) {
-    failures.push("CRON_SECRET must be replaced with a real secret");
   }
 
   if (mode === "build" || mode === "start" || mode === "runtime") {

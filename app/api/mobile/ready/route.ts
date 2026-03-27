@@ -10,7 +10,6 @@ export async function GET() {
     mobileJwtSecret: Boolean(process.env.MOBILE_JWT_SECRET),
     nextAuthSecret: Boolean(process.env.NEXTAUTH_SECRET),
     esp32DeviceSecret: Boolean(process.env.ESP32_DEVICE_SECRET),
-    cronSecret: Boolean(process.env.CRON_SECRET),
     nextAuthUrl: Boolean(nextAuthUrl),
     appBaseUrl: Boolean(appBaseUrl),
     baseUrlParity: Boolean(nextAuthUrl && appBaseUrl && nextAuthUrl === appBaseUrl),
@@ -30,7 +29,6 @@ export async function GET() {
     checks.mobileJwtSecret &&
     checks.nextAuthSecret &&
     checks.esp32DeviceSecret &&
-    checks.cronSecret &&
     checks.nextAuthUrl &&
     checks.appBaseUrl;
   return NextResponse.json({
