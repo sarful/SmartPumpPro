@@ -167,7 +167,7 @@ Motor Relay      -> GPIO25
 #define POLL_INTERVAL      5000UL
 #define FAIL_TIMEOUT       15000UL
 #define RFID_DEBOUNCE_MS   3000UL
-#define HTTP_TIMEOUT_MS    5000UL
+#define HTTP_TIMEOUT_MS    15000UL
 
 #define LOAD_ACTIVE_LOW         1
 #define DEVICE_READY_ACTIVE_LOW 0
@@ -307,6 +307,8 @@ void pollServer(const String& uid = "") {
 
   WiFiClientSecure client;
   client.setInsecure(); // production এ পরে setCACert use করবে
+
+  client.setTimeout(15);
 
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT_MS);
@@ -477,7 +479,7 @@ void loop() {
   updateInputLEDs(ls, dev);
 
   String uid = readRFID();
-  if (uid.length() && millis() - lastRFID > RFID_DEBOUNCE_MS) {
+  if (uid.length() && (lastRFID == 0 || millis() - lastRFID > RFID_DEBOUNCE_MS)) {
     lastRFID = millis();
     LOG("[RFID] Sending UID to server: ");
     LOGLN(uid);
@@ -1288,7 +1290,7 @@ void loop() {
   updateNetLED();
 
   String uid = readRFID();
-  if (uid.length() && millis() - lastRFID > RFID_DEBOUNCE_MS) {
+  if (uid.length() && (lastRFID == 0 || millis() - lastRFID > RFID_DEBOUNCE_MS)) {
     lastRFID = millis();
     sendRFID(uid);
   }
