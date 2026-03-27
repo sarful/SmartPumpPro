@@ -161,7 +161,7 @@ Motor Relay      -> GPIO25
 #define POLL_INTERVAL 5000UL
 #define FAIL_TIMEOUT  15000UL
 #define RFID_DEBOUNCE_MS 3000UL
-#define LOAD_ACTIVE_LOW 0
+#define LOAD_ACTIVE_LOW 1
 #define DEVICE_READY_ACTIVE_LOW 0
 
 const char* API_URL = "https://pms.mechatronicslab.net/api/esp32/poll";
