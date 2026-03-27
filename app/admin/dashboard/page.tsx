@@ -945,6 +945,7 @@ void loop() {
 }`;
 
   const ttgoTCallCode = `#define TINY_GSM_MODEM_SIM800
+#define TINY_GSM_RX_BUFFER 1024
 
 /*
 ===========================================================
@@ -1037,8 +1038,9 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 #define POLL_INTERVAL_MS 5000UL
 #define RFID_DEBOUNCE_MS 3000UL
 #define FAILSAFE_TIMEOUT_MS 15000UL
+#define HTTP_WAIT_TIMEOUT_MS 15000UL
 #define LOAD_ACTIVE_LOW 1
-#define DEVICE_READY_ACTIVE_LOW 1
+#define DEVICE_READY_ACTIVE_LOW 0
 
 const char APN[] = "internet";
 const char* API_HOST = "pms.mechatronicslab.net";
@@ -1110,8 +1112,10 @@ void setMotor(bool on) {
 
 String httpGET(const String& url, int& code) {
   code = -1;
+  client.stop();
 
   if (!client.connect(API_HOST, API_PORT)) {
+    code = -2;
     return "";
   }
 
@@ -1121,12 +1125,23 @@ String httpGET(const String& url, int& code) {
   client.print("Connection: close\\r\\n\\r\\n");
 
   unsigned long start = millis();
-  while (!client.available() && millis() - start < 10000UL) {
+  while (!client.available() && millis() - start < HTTP_WAIT_TIMEOUT_MS) {
     delay(10);
+  }
+
+  if (!client.available()) {
+    code = -11;
+    client.stop();
+    return "";
   }
 
   String statusLine = client.readStringUntil('\\n');
   int firstSpace = statusLine.indexOf(' ');
+  if (firstSpace < 0) {
+    code = -12;
+    client.stop();
+    return "";
+  }
   code = statusLine.substring(firstSpace + 1).toInt();
 
   while (client.connected()) {
@@ -1220,17 +1235,17 @@ void pollServer() {
   setMotor(turnOn);
   lastSuccess = millis();
 
-  lcd.setCursor(0, 0);
-  lcd.print("Motor:");
-  lcd.print(turnOn ? "ON " : "OFF");
-  lcd.print(" LS:");
-  lcd.print(ls ? "Y" : "N");
+  String line1 = "Motor:";
+  line1 += turnOn ? "ON " : "OFF";
+  line1 += " LS:";
+  line1 += ls ? "Y" : "N";
 
-  lcd.setCursor(0, 1);
-  lcd.print("Dev:");
-  lcd.print(dev ? "OK" : "NO");
-  lcd.print(" Net:");
-  lcd.print(modem.isGprsConnected() ? "OK" : "NO");
+  String line2 = "Dev:";
+  line2 += dev ? "OK" : "NO";
+  line2 += " Net:";
+  line2 += modem.isGprsConnected() ? "OK" : "NO";
+
+  lcdMessage(line1, line2);
 }
 
 void failSafe() {
