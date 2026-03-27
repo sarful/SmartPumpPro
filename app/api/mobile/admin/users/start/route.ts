@@ -5,7 +5,6 @@ import User from "@/models/User";
 import Admin from "@/models/Admin";
 import { addToQueue, getQueuePosition, isMotorBusy } from "@/lib/queue-engine";
 import { isDeviceReadyEffective } from "@/lib/device-readiness";
-import { MIN_RUNTIME_THRESHOLD } from "@/lib/timer-engine";
 
 type Body = {
   userId?: string;
@@ -55,15 +54,13 @@ export async function POST(req: NextRequest) {
     const requestedMinutes =
       typeof body.requestedMinutes === "number" && body.requestedMinutes > 0
         ? Math.floor(body.requestedMinutes)
-        : Math.max(Math.floor(user.lastSetMinutes || user.motorRunningTime || 0), MIN_RUNTIME_THRESHOLD + 1);
-    if (requestedMinutes <= MIN_RUNTIME_THRESHOLD) {
-      return NextResponse.json(
-        { error: `Requested minutes must be greater than ${MIN_RUNTIME_THRESHOLD}` },
-        { status: 400 },
-      );
+        : Math.max(Math.floor(user.lastSetMinutes || user.motorRunningTime || 0), 5);
+    if (requestedMinutes < 5) {
+      return NextResponse.json({ error: "Minimum 5 minutes required" }, { status: 400 });
     }
 
-    if ((user.availableMinutes ?? 0) < requestedMinutes) {
+    const minRequired = Math.max(requestedMinutes, 5);
+    if ((user.availableMinutes ?? 0) < minRequired) {
       return NextResponse.json(
         { error: `Insufficient minutes. Need ${requestedMinutes}m, available ${user.availableMinutes ?? 0}m` },
         { status: 400 },
