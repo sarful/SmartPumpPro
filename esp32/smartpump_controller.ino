@@ -83,11 +83,11 @@ Motor Relay      -> GPIO25
 #define FAIL_TIMEOUT  15000UL
 #define RFID_DEBOUNCE_MS 3000UL
 #define LOAD_ACTIVE_LOW 1
-#define DEVICE_READY_ACTIVE_LOW 0
+#define DEVICE_READY_ACTIVE_LOW 1
 
 const char* API_URL = "https://pms.mechatronicslab.net/api/esp32/poll";
-const char* ADMIN_ID = "PUT_ADMIN_ID_HERE";
-const char* DEVICE_KEY = "PUT_YOUR_ESP32_DEVICE_SECRET_HERE";
+const char* ADMIN_ID = "69a40837b2e2acccfbe8c476";
+const char* DEVICE_KEY = "spm_9Kx2vQ7mLp4Tn8YzR1cH6uBw3Fd0Js5";
 
 // =========================
 // GLOBAL
@@ -120,9 +120,13 @@ bool readDevice() {
 void lcdMessage(const String& line1, const String& line2 = "") {
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print(line1.substring(0, 16));
+  String row1 = line1.substring(0, 16);
+  while (row1.length() < 16) row1 += " ";
+  lcd.print(row1);
   lcd.setCursor(0, 1);
-  lcd.print(line2.substring(0, 16));
+  String row2 = line2.substring(0, 16);
+  while (row2.length() < 16) row2 += " ";
+  lcd.print(row2);
 }
 
 void updateNetLED() {
@@ -221,6 +225,9 @@ void pollServer(const String& uid = "") {
         lcd.print(backendLS ? "LS" : "OK");
       }
     }
+  } else {
+    lcdMessage("HTTP Error", String(code));
+    Serial.printf("[HTTP] code=%d body=%s\n", code, http.getString().c_str());
   }
 
   http.end();

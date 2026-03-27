@@ -21,12 +21,12 @@
 #define HTTP_TIMEOUT_MS 4000
 #define FAILSAFE_TIMEOUT_MS 15000UL
 #define LOAD_ACTIVE_LOW 1
-#define DEVICE_READY_ACTIVE_LOW 0
+#define DEVICE_READY_ACTIVE_LOW 1
 
 // ===== YOUR CONFIG =====
-const char* ADMIN_ID = "PUT_YOUR_ADMIN_ID_HERE";       // e.g. 69a40837b2e2acccfbe8c476
+const char* ADMIN_ID = "69a40837b2e2acccfbe8c476";
 const char* API_URL = "https://pms.mechatronicslab.net/api/esp32/poll";
-const char* DEVICE_KEY = "PUT_YOUR_ESP32_DEVICE_SECRET_HERE";
+const char* DEVICE_KEY = "spm_9Kx2vQ7mLp4Tn8YzR1cH6uBw3Fd0Js5";
 
 // ===== GLOBAL =====
 unsigned long lastPoll = 0;

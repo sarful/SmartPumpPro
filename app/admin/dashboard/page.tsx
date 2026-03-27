@@ -166,7 +166,7 @@ Motor Relay      -> GPIO25
 
 const char* API_URL = "https://pms.mechatronicslab.net/api/esp32/poll";
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
-const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
+const char* DEVICE_KEY = "spm_9Kx2vQ7mLp4Tn8YzR1cH6uBw3Fd0Js5";
 
 // =========================
 // GLOBAL
@@ -428,7 +428,7 @@ WIFI_PASS = "YOUR_WIFI_PASSWORD"
 
 API_URL = "https://pms.mechatronicslab.net/api/esp32/poll"
 ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}"
-DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET"
+DEVICE_KEY = "spm_9Kx2vQ7mLp4Tn8YzR1cH6uBw3Fd0Js5"
 
 POLL_INTERVAL_MS = 5000
 FAIL_TIMEOUT_MS = 20000
@@ -684,7 +684,7 @@ NOTES
 
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
 const char* API_HOST = "https://pms.mechatronicslab.net";
-const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
+const char* DEVICE_KEY = "spm_9Kx2vQ7mLp4Tn8YzR1cH6uBw3Fd0Js5";
 
 unsigned long lastPoll = 0;
 unsigned long lastSuccess = 0;
@@ -913,14 +913,14 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 #define RFID_DEBOUNCE_MS 3000UL
 #define FAILSAFE_TIMEOUT_MS 15000UL
 #define LOAD_ACTIVE_LOW 1
-#define DEVICE_READY_ACTIVE_LOW 0
+#define DEVICE_READY_ACTIVE_LOW 1
 
 const char APN[] = "internet";
 const char* API_HOST = "pms.mechatronicslab.net";
 const int API_PORT = 443;
 const char* API_PATH = "/api/esp32/poll";
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
-const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
+const char* DEVICE_KEY = "spm_9Kx2vQ7mLp4Tn8YzR1cH6uBw3Fd0Js5";
 
 HardwareSerial SerialAT(1);
 TinyGsm modem(SerialAT);
@@ -934,9 +934,13 @@ unsigned long lastSuccess = 0;
 void lcdMessage(const String& line1, const String& line2 = "") {
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print(line1.substring(0, 16));
+  String row1 = line1.substring(0, 16);
+  while (row1.length() < 16) row1 += " ";
+  lcd.print(row1);
   lcd.setCursor(0, 1);
-  lcd.print(line2.substring(0, 16));
+  String row2 = line2.substring(0, 16);
+  while (row2.length() < 16) row2 += " ";
+  lcd.print(row2);
 }
 
 void writeOptionalPin(int pin, bool on) {
@@ -1069,7 +1073,10 @@ void pollServer() {
 
   int code;
   String body = httpGET(url, code);
-  if (code != 200) return;
+  if (code != 200) {
+    lcdMessage("HTTP Error", String(code));
+    return;
+  }
 
   StaticJsonDocument<512> doc;
   if (deserializeJson(doc, body)) return;
@@ -1223,7 +1230,7 @@ const char gprsPass[] = "";
 const char* ADMIN_ID = "${adminId || "REPLACE_ADMIN_ID"}";
 const char* SERVER   = "pms.mechatronicslab.net";
 const int   PORT     = 80;
-const char* DEVICE_KEY = "REPLACE_WITH_ESP32_DEVICE_SECRET";
+const char* DEVICE_KEY = "spm_9Kx2vQ7mLp4Tn8YzR1cH6uBw3Fd0Js5";
 
 TinyGsm modem(SerialAT);
 TinyGsmClient client(modem);
