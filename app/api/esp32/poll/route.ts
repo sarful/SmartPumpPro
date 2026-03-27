@@ -5,11 +5,11 @@ import User from '@/models/User';
 import Admin from '@/models/Admin';
 import Queue from '@/models/Queue';
 import { getQueuePosition } from '@/lib/queue-engine';
-import { tickRunningMotors } from '@/lib/timer-engine';
+import { MIN_RUNTIME_THRESHOLD, tickUnifiedMotorSessions } from '@/lib/timer-engine';
 import { activateLoadShedding, clearLoadShedding } from '@/lib/loadshedding-engine';
 import { isDeviceOnline, isDeviceReadyEffective } from '@/lib/device-readiness';
 import { logReadinessTransitions } from '@/lib/usage-logger';
-import { billCardModeFloorMinutes, finalizeCardModeSession, normalizeRfidUid } from '@/lib/card-mode';
+import { finalizeCardModeSession, normalizeRfidUid } from '@/lib/card-mode';
 import {
   getDeviceSecretHeaderName,
   isAuthorizedDeviceRequest,
@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
 
     await connectDB();
     // Run one tick to decrement timers and auto-stop if needed
-    await tickRunningMotors();
+    await tickUnifiedMotorSessions();
 
     if (!adminId) {
       return NextResponse.json(BAD_REQUEST, { status: 400 });
@@ -300,7 +300,7 @@ export async function GET(req: NextRequest) {
       }
 
       // Balance rule: must have > 5 minutes to run in card mode.
-      if ((cardUser.availableMinutes ?? 0) <= 5) {
+      if ((cardUser.availableMinutes ?? 0) <= MIN_RUNTIME_THRESHOLD) {
         if (admin?.cardModeActive && String(admin.cardActiveUserId ?? '') === String(cardUser._id)) {
           await finalizeCardModeSession({ adminId: adminLookupId, reason: 'insufficient' });
         }
@@ -350,19 +350,17 @@ export async function GET(req: NextRequest) {
         {
           $set: {
             motorStatus: 'RUNNING',
-            motorStartTime: isNewSession ? new Date() : new Date(),
+            motorStartTime: isNewSession ? new Date() : admin?.cardActivatedAt ?? new Date(),
+            lastSetMinutes: cardUser.availableMinutes ?? 0,
             motorRunningTime: cardUser.availableMinutes ?? 0,
           },
         },
       ).exec();
-
-      // Bill full minutes elapsed so far (floor). Remainder is charged on removal/admin override.
-      await billCardModeFloorMinutes({ adminId: adminLookupId });
       const freshCardUser = await User.findById(cardUser._id)
         .select({ motorStatus: 1, motorRunningTime: 1, availableMinutes: 1, adminId: 1, username: 1, status: 1 })
         .lean();
 
-      if (freshCardUser && (freshCardUser.availableMinutes ?? 0) <= 5) {
+      if (freshCardUser && (freshCardUser.availableMinutes ?? 0) <= MIN_RUNTIME_THRESHOLD) {
         await finalizeCardModeSession({ adminId: adminLookupId, reason: 'insufficient' });
         return NextResponse.json({
           userId: freshCardUser._id,
@@ -390,7 +388,14 @@ export async function GET(req: NextRequest) {
         } else if (!shouldHold && freshCardUser.motorStatus === 'HOLD') {
           await User.updateOne(
             { _id: freshCardUser._id },
-            { $set: { motorStatus: 'RUNNING', motorStartTime: new Date(), motorRunningTime: freshCardUser.availableMinutes ?? 0 } },
+            {
+              $set: {
+                motorStatus: 'RUNNING',
+                motorStartTime: new Date(),
+                lastSetMinutes: freshCardUser.motorRunningTime ?? freshCardUser.availableMinutes ?? 0,
+                motorRunningTime: freshCardUser.motorRunningTime ?? freshCardUser.availableMinutes ?? 0,
+              },
+            },
           ).exec();
         }
       }
@@ -406,7 +411,8 @@ export async function GET(req: NextRequest) {
             $set: {
               motorStatus: 'RUNNING',
               motorStartTime: new Date(),
-              motorRunningTime: finalUser.availableMinutes ?? 0,
+              lastSetMinutes: finalUser.motorRunningTime ?? finalUser.availableMinutes ?? 0,
+              motorRunningTime: finalUser.motorRunningTime ?? finalUser.availableMinutes ?? 0,
             },
           },
         ).exec();

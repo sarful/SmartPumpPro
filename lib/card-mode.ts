@@ -31,29 +31,11 @@ export async function getAdminCardMode(adminId: string | Types.ObjectId) {
     .lean();
 }
 
-function computeFloorMinutes(activatedAt: Date | null | undefined, nowMs: number) {
-  if (!activatedAt) return 0;
-  const started = new Date(activatedAt).getTime();
-  if (Number.isNaN(started)) return 0;
-  const activeSeconds = Math.max(Math.floor((nowMs - started) / 1000), 0);
-  return Math.floor(activeSeconds / 60);
-}
-
-function computeCeilMinutes(activatedAt: Date | null | undefined, nowMs: number) {
-  if (!activatedAt) return 0;
-  const started = new Date(activatedAt).getTime();
-  if (Number.isNaN(started)) return 0;
-  const activeSeconds = Math.max(Math.floor((nowMs - started) / 1000), 0);
-  if (activeSeconds <= 0) return 0;
-  return Math.ceil(activeSeconds / 60);
-}
-
 export async function billCardModeFloorMinutes(params: {
   adminId: string | Types.ObjectId;
   now?: Date;
 }): Promise<{ billedDelta: number; availableMinutes?: number } | null> {
   await connectDB();
-  const nowMs = (params.now ?? new Date()).getTime();
   const adminObjectId = toObjectId(params.adminId);
 
   const admin = await Admin.findById(adminObjectId)
@@ -61,29 +43,8 @@ export async function billCardModeFloorMinutes(params: {
     .lean();
   if (!admin?.cardModeActive || !admin.cardActiveUserId) return null;
 
-  const shouldBeBilled = computeFloorMinutes(admin.cardActivatedAt, nowMs);
-  const alreadyBilled = Math.max(Number(admin.cardBilledMinutes || 0), 0);
-  const delta = Math.max(shouldBeBilled - alreadyBilled, 0);
-  if (delta <= 0) return { billedDelta: 0 };
-
   const user = await User.findById(admin.cardActiveUserId).select({ availableMinutes: 1 }).lean();
-  const current = user?.availableMinutes ?? 0;
-  const next = Math.max(current - delta, 0);
-
-  await Promise.all([
-    User.updateOne(
-      { _id: admin.cardActiveUserId },
-      {
-        $set: {
-          availableMinutes: next,
-          motorRunningTime: next,
-        },
-      },
-    ).exec(),
-    Admin.updateOne({ _id: adminObjectId }, { $set: { cardBilledMinutes: shouldBeBilled } }).exec(),
-  ]);
-
-  return { billedDelta: delta, availableMinutes: next };
+  return { billedDelta: 0, availableMinutes: user?.availableMinutes ?? 0 };
 }
 
 export async function finalizeCardModeSession(params: {
@@ -92,7 +53,6 @@ export async function finalizeCardModeSession(params: {
   now?: Date;
 }): Promise<{ ended: boolean; usedMinutes: number; userId?: string }>{
   await connectDB();
-  const nowMs = (params.now ?? new Date()).getTime();
   const adminObjectId = toObjectId(params.adminId);
 
   const admin = await Admin.findById(adminObjectId)
@@ -106,25 +66,19 @@ export async function finalizeCardModeSession(params: {
 
   if (!admin?.cardModeActive) return { ended: false, usedMinutes: 0 };
 
-  const alreadyBilled = Math.max(Number(admin.cardBilledMinutes || 0), 0);
-  const shouldBeBilled =
-    params.reason === 'removed' || params.reason === 'admin_override'
-      ? computeCeilMinutes(admin.cardActivatedAt, nowMs)
-      : computeFloorMinutes(admin.cardActivatedAt, nowMs);
-  const delta = Math.max(shouldBeBilled - alreadyBilled, 0);
-
   if (admin.cardActiveUserId) {
     const user = await User.findById(admin.cardActiveUserId)
-      .select({ availableMinutes: 1 })
+      .select({ availableMinutes: 1, lastSetMinutes: 1, motorRunningTime: 1 })
       .lean();
-    const current = user?.availableMinutes ?? 0;
-    const next = Math.max(current - delta, 0);
+    const remaining = Math.max(user?.availableMinutes ?? user?.motorRunningTime ?? 0, 0);
+    const initial = Math.max(user?.lastSetMinutes ?? remaining, 0);
+    const usedMinutes = Math.max(initial - remaining, 0);
 
     await User.updateOne(
       { _id: admin.cardActiveUserId },
       {
         $set: {
-          availableMinutes: next,
+          availableMinutes: remaining,
           motorRunningTime: 0,
           lastSetMinutes: 0,
           motorStartTime: null,
@@ -132,6 +86,28 @@ export async function finalizeCardModeSession(params: {
         },
       },
     ).exec();
+
+    await Admin.updateOne(
+      { _id: adminObjectId },
+      {
+        $set: {
+          cardModeActive: false,
+          cardActiveUid: null,
+          cardActiveUserId: null,
+          cardActivatedAt: null,
+          cardLastSeenAt: null,
+          cardBilledMinutes: 0,
+          cardModeMessage: null,
+          cardModeStopReason: params.reason,
+        },
+      },
+    ).exec();
+
+    return {
+      ended: true,
+      usedMinutes,
+      userId: String(admin.cardActiveUserId),
+    };
   }
 
   await Admin.updateOne(
@@ -152,7 +128,7 @@ export async function finalizeCardModeSession(params: {
 
   return {
     ended: true,
-    usedMinutes: shouldBeBilled,
+    usedMinutes: 0,
     userId: admin.cardActiveUserId ? String(admin.cardActiveUserId) : undefined,
   };
 }

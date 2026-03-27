@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { tickCardModeBilling, tickRunningMotors } from '@/lib/timer-engine';
+import { tickUnifiedMotorSessions } from '@/lib/timer-engine';
 import { reportIncident } from '@/lib/observability';
 
 export async function GET(req: NextRequest) {
@@ -25,8 +25,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    await tickRunningMotors();
-    await tickCardModeBilling();
+    await tickUnifiedMotorSessions();
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';

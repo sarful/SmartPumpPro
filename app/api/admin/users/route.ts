@@ -4,6 +4,7 @@ import User from '@/models/User';
 import { hash } from 'bcryptjs';
 import Admin from '@/models/Admin';
 import { requireWebMutationSession } from '@/lib/web-mutation-auth';
+import { tickUnifiedMotorSessions } from '@/lib/timer-engine';
 
 type UserLean = {
   _id: unknown;
@@ -21,6 +22,7 @@ export async function GET(_req: NextRequest) {
   if (authResult.response) return authResult.response;
   const { session } = authResult;
   await connectDB();
+  await tickUnifiedMotorSessions();
   const admin = await Admin.findById(session.user.adminId).select({ username: 1 }).lean();
   const users = await User.find({ adminId: session.user.adminId })
     .select({

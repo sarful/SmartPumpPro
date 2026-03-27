@@ -6,6 +6,7 @@ import User from "@/models/User";
 import Queue from "@/models/Queue";
 import SystemState from "@/models/SystemState";
 import { getAdminRuntimeState, getUserUseSource } from "@/lib/dashboard-runtime";
+import { tickUnifiedMotorSessions } from "@/lib/timer-engine";
 
 type AdminLean = {
   _id: unknown;
@@ -41,6 +42,7 @@ export async function GET(req: NextRequest) {
     }
 
     await connectDB();
+    await tickUnifiedMotorSessions();
     const [adminCount, userCount, running, waiting, admins, users, settings] = await Promise.all([
       Admin.countDocuments({}),
       User.countDocuments({}),

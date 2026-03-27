@@ -6,6 +6,7 @@ import User from "@/models/User";
 import MinuteRequest from "@/models/MinuteRequest";
 import { getActiveQueueSnapshot, getAdminRuntimeState, getUserUseSource } from "@/lib/dashboard-runtime";
 import { logReadinessTransitions } from "@/lib/usage-logger";
+import { tickUnifiedMotorSessions } from "@/lib/timer-engine";
 
 type UserLean = {
   _id: unknown;
@@ -48,6 +49,7 @@ export async function GET(req: NextRequest) {
     const adminId = payload.adminId || payload.sub;
 
     await connectDB();
+    await tickUnifiedMotorSessions();
 
     const admin = await Admin.findById(adminId)
       .select({

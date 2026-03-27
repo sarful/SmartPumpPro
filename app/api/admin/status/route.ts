@@ -4,6 +4,7 @@ import { connectDB } from '@/lib/mongodb';
 import Admin from '@/models/Admin';
 import { isDeviceOnline, isDeviceReadyEffective } from '@/lib/device-readiness';
 import { logReadinessTransitions } from '@/lib/usage-logger';
+import { tickUnifiedMotorSessions } from '@/lib/timer-engine';
 
 export async function GET(_req: NextRequest) {
   const session = await auth();
@@ -11,6 +12,7 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   await connectDB();
+  await tickUnifiedMotorSessions();
   const admin = await Admin.findById(session.user.adminId)
     .select({
       loadShedding: 1,

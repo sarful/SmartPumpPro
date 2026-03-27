@@ -10,6 +10,7 @@ import {
   getQueueMetrics,
 } from "@/lib/dashboard-runtime";
 import { logReadinessTransitions } from "@/lib/usage-logger";
+import { tickUnifiedMotorSessions } from "@/lib/timer-engine";
 
 export async function GET(req: NextRequest) {
   try {
@@ -20,6 +21,7 @@ export async function GET(req: NextRequest) {
     }
 
     await connectDB();
+    await tickUnifiedMotorSessions();
     const user = await User.findById(payload.sub)
       .select({
         username: 1,

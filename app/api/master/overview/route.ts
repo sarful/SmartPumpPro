@@ -6,6 +6,7 @@ import User from '@/models/User';
 import Queue from '@/models/Queue';
 import { isDeviceOnline, isDeviceReadyEffective } from '@/lib/device-readiness';
 import { enforceRateLimit } from '@/lib/api-guard';
+import { tickUnifiedMotorSessions } from '@/lib/timer-engine';
 
 type AdminLean = {
   _id: unknown;
@@ -41,6 +42,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   await connectDB();
+  await tickUnifiedMotorSessions();
   const [adminCount, userCount, runningQueueCount, waiting, adminList, userList] = await Promise.all([
     Admin.countDocuments({}),
     User.countDocuments({}),

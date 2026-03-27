@@ -4,10 +4,12 @@ import User, { UserDocument } from '@/models/User';
 import Queue from '@/models/Queue';
 import { startNextUser } from '@/lib/queue-engine';
 import Admin from '@/models/Admin';
-import { billCardModeFloorMinutes, finalizeCardModeSession, getAdminCardMode } from '@/lib/card-mode';
+import { finalizeCardModeSession } from '@/lib/card-mode';
 
 const toObjectId = (id: string | Types.ObjectId): Types.ObjectId =>
   typeof id === 'string' ? new Types.ObjectId(id) : id;
+
+export const MIN_RUNTIME_THRESHOLD = 5;
 
 export function calculateUsedMinutes(startTime: Date | null, setMinutes: number): number {
   if (!startTime || !setMinutes || setMinutes <= 0) return 0;
@@ -17,23 +19,30 @@ export function calculateUsedMinutes(startTime: Date | null, setMinutes: number)
 }
 
 export async function tickRunningMotors(): Promise<void> {
+  await tickUnifiedMotorSessions();
+}
+
+export async function tickUnifiedMotorSessions(): Promise<void> {
   await connectDB();
   const now = Date.now();
   const runningUsers = await User.find({ motorStatus: 'RUNNING' }).lean();
 
   for (const user of runningUsers) {
     if (!user.motorStartTime) continue;
-
-    // If the admin is under load shedding or card mode, skip decrementing (card mode is billed separately)
-    const admin = await Admin.findById(user.adminId).select({ loadShedding: 1, cardModeActive: 1, cardActiveUserId: 1 }).lean();
+    const admin = await Admin.findById(user.adminId)
+      .select({ loadShedding: 1, cardModeActive: 1, cardActiveUserId: 1 })
+      .lean();
     if (admin?.loadShedding) continue;
-    if (admin?.cardModeActive) continue;
+
+    const isCardModeUser =
+      Boolean(admin?.cardModeActive) &&
+      String(admin?.cardActiveUserId ?? '') === String(user._id);
 
     const elapsedMinutesTotal = Math.floor((now - new Date(user.motorStartTime).getTime()) / 60000);
     if (elapsedMinutesTotal <= 0) continue;
 
     const remainingBefore = user.motorRunningTime ?? 0;
-    const lastSet = user.lastSetMinutes ?? 0;
+    const lastSet = user.lastSetMinutes ?? remainingBefore;
     const usedAlready = Math.max(lastSet - remainingBefore, 0);
     const delta = Math.max(elapsedMinutesTotal - usedAlready, 0);
     if (delta <= 0) continue;
@@ -41,43 +50,69 @@ export async function tickRunningMotors(): Promise<void> {
     const decrement = Math.min(delta, remainingBefore);
     const remainingAfter = Math.max(remainingBefore - decrement, 0);
 
-    await User.findByIdAndUpdate(user._id, {
-      $set: {
-        motorRunningTime: remainingAfter,
-        motorStatus: remainingAfter > 0 ? 'RUNNING' : 'OFF',
-        motorStartTime: remainingAfter > 0 ? user.motorStartTime : null,
-      },
-    }).exec();
+    if (isCardModeUser) {
+      if (remainingAfter <= MIN_RUNTIME_THRESHOLD) {
+        await User.findByIdAndUpdate(user._id, {
+          $set: {
+            availableMinutes: remainingAfter,
+            motorRunningTime: remainingAfter,
+            motorStatus: 'RUNNING',
+            motorStartTime: user.motorStartTime,
+          },
+        }).exec();
+        await finalizeCardModeSession({ adminId: user.adminId, reason: 'insufficient' });
+      } else {
+        await User.findByIdAndUpdate(user._id, {
+          $set: {
+            availableMinutes: remainingAfter,
+            motorRunningTime: remainingAfter,
+            motorStatus: 'RUNNING',
+            motorStartTime: user.motorStartTime,
+          },
+        }).exec();
+      }
+      continue;
+    }
 
-    if (remainingAfter === 0) {
+    if (remainingAfter <= MIN_RUNTIME_THRESHOLD) {
+      await User.findByIdAndUpdate(user._id, {
+        $inc: { availableMinutes: remainingAfter },
+        $set: {
+          motorRunningTime: 0,
+          motorStatus: 'OFF',
+          motorStartTime: null,
+          lastSetMinutes: 0,
+        },
+      }).exec();
+
       await Queue.findOneAndUpdate(
         { adminId: user.adminId, userId: user._id, status: 'RUNNING' },
         { status: 'DONE' },
       ).exec();
       await startNextUser(user.adminId);
+
       const { logEvent } = await import('@/lib/usage-logger');
       await logEvent({
         adminId: user.adminId,
         userId: user._id,
         event: 'motor_stop',
-        usedMinutes: user.lastSetMinutes - remainingBefore + decrement,
+        usedMinutes: lastSet - remainingAfter,
       });
+      continue;
     }
+
+    await User.findByIdAndUpdate(user._id, {
+      $set: {
+        motorRunningTime: remainingAfter,
+        motorStatus: 'RUNNING',
+        motorStartTime: user.motorStartTime,
+      },
+    }).exec();
   }
 }
 
 export async function tickCardModeBilling(): Promise<void> {
-  await connectDB();
-  const admins = await Admin.find({ cardModeActive: true }).select({ _id: 1 }).lean();
-  for (const admin of admins) {
-    await billCardModeFloorMinutes({ adminId: admin._id });
-    const meta = await getAdminCardMode(admin._id);
-    if (!meta?.cardModeActive || !meta.cardActiveUserId) continue;
-    const cardUser = await User.findById(meta.cardActiveUserId).select({ availableMinutes: 1 }).lean();
-    if ((cardUser?.availableMinutes ?? 0) <= 5) {
-      await finalizeCardModeSession({ adminId: admin._id, reason: 'insufficient' });
-    }
-  }
+  await tickUnifiedMotorSessions();
 }
 
 export async function stopMotorForUser(
