@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/mongodb";
 import { getMobileAccessPayload } from "@/lib/mobile-request-auth";
 import { addToQueue, getQueuePosition } from "@/lib/queue-engine";
 import { calculateUsedMinutes, stopMotorForUser } from "@/lib/timer-engine";
+import { MIN_RUNTIME_THRESHOLD } from "@/lib/timer-engine";
 import Admin from "@/models/Admin";
 import Queue from "@/models/Queue";
 import User from "@/models/User";
@@ -126,7 +127,13 @@ export async function POST(req: NextRequest) {
       const minutes =
         typeof requestedMinutes === "number" && requestedMinutes > 0
           ? Math.floor(requestedMinutes)
-          : Math.max(Math.floor(user.lastSetMinutes || 0), 5);
+          : Math.max(Math.floor(user.lastSetMinutes || 0), MIN_RUNTIME_THRESHOLD + 1);
+      if (minutes <= MIN_RUNTIME_THRESHOLD) {
+        return NextResponse.json(
+          { error: `Requested minutes must be greater than ${MIN_RUNTIME_THRESHOLD}` },
+          { status: 400 },
+        );
+      }
 
       if (user.availableMinutes < minutes) {
         return NextResponse.json(

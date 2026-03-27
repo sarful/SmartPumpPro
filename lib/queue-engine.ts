@@ -3,6 +3,7 @@ import { connectDB } from '@/lib/mongodb';
 import Queue, { QueueDocument } from '@/models/Queue';
 import User from '@/models/User';
 import { logEvent } from '@/lib/usage-logger';
+import { MIN_RUNTIME_THRESHOLD } from '@/lib/timer-engine';
 
 const toObjectId = (id: string | Types.ObjectId): Types.ObjectId =>
   typeof id === 'string' ? new Types.ObjectId(id) : id;
@@ -22,6 +23,10 @@ export async function addToQueue(
   await connectDB();
   const adminObjectId = toObjectId(adminId);
   const userObjectId = toObjectId(userId);
+
+  if (requestedMinutes <= MIN_RUNTIME_THRESHOLD) {
+    throw new Error(`requestedMinutes must be greater than ${MIN_RUNTIME_THRESHOLD}`);
+  }
 
   // Prevent duplicate active entries for same user
   const existingActive = await Queue.findOne({
