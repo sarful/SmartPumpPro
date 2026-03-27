@@ -448,24 +448,44 @@ export async function GET(req: NextRequest) {
       };
     }
 
-    if (adminLookupId && admin?.cardModeActive && !effectiveDeviceReady) {
-      await finalizeCardModeSession({ adminId: adminLookupId, reason: 'admin_override' });
-      admin = {
-        ...(admin || {}),
-        cardModeActive: false,
-        cardActiveUid: null,
-        cardActiveUserId: null,
-        cardModeMessage: 'Device not ready',
-      };
-    } else if (adminLookupId && admin?.cardModeActive && effectiveLoadShedding) {
-      await finalizeCardModeSession({ adminId: adminLookupId, reason: 'admin_override' });
-      admin = {
-        ...(admin || {}),
-        cardModeActive: false,
-        cardActiveUid: null,
-        cardActiveUserId: null,
-        cardModeMessage: 'Load shedding active now',
-      };
+    if (adminLookupId && admin?.cardModeActive && admin.cardActiveUserId) {
+      const activeCardUser = await User.findById(admin.cardActiveUserId)
+        .select({ status: 1, motorStatus: 1, motorRunningTime: 1, availableMinutes: 1 })
+        .lean();
+
+      const activeCardUserBlocked = activeCardUser?.status === 'suspended';
+      const shouldHoldCard = effectiveLoadShedding || !effectiveDeviceReady || activeCardUserBlocked;
+
+      if (shouldHoldCard && activeCardUser?.motorStatus === 'RUNNING') {
+        await User.updateOne(
+          { _id: admin.cardActiveUserId },
+          { $set: { motorStatus: 'HOLD', motorStartTime: null } },
+        ).exec();
+        admin = {
+          ...(admin || {}),
+          cardModeMessage: !effectiveDeviceReady
+            ? 'Device not ready'
+            : effectiveLoadShedding
+              ? 'Load shedding active now'
+              : 'Card user suspended',
+        };
+      } else if (!shouldHoldCard && activeCardUser?.motorStatus === 'HOLD') {
+        await User.updateOne(
+          { _id: admin.cardActiveUserId },
+          {
+            $set: {
+              motorStatus: 'RUNNING',
+              motorStartTime: new Date(),
+              lastSetMinutes: activeCardUser.motorRunningTime ?? activeCardUser.availableMinutes ?? 0,
+              motorRunningTime: activeCardUser.motorRunningTime ?? activeCardUser.availableMinutes ?? 0,
+            },
+          },
+        ).exec();
+        admin = {
+          ...(admin || {}),
+          cardModeMessage: 'Now using card',
+        };
+      }
     }
 
     const runningQueue = await Queue.findOne({ adminId: adminLookupId, status: 'RUNNING' })
