@@ -20,8 +20,32 @@ type AdminRow = {
   devicePinHigh?: boolean;
   suspendReason?: string;
 };
-type UserRow = { _id: string; username: string; adminId: string; adminName?: string; rfidUid?: string; availableMinutes: number; motorStatus: string; motorRunningTime?: number; status?: string; suspendReason?: string; useSource?: string };
-type UserWithAdmin = { _id: string; username: string; adminId: string; adminName?: string; rfidUid?: string; availableMinutes?: number; motorStatus?: string; motorRunningTime?: number; status?: string; suspendReason?: string; useSource?: string };
+type UserRow = {
+  _id: string;
+  username: string;
+  adminId: string;
+  adminName?: string;
+  rfidUid?: string;
+  availableMinutes: number;
+  motorStatus: string;
+  motorRunningTime?: number;
+  status?: string;
+  suspendReason?: string;
+  useSource?: string;
+};
+type UserWithAdmin = {
+  _id: string;
+  username: string;
+  adminId: string;
+  adminName?: string;
+  rfidUid?: string;
+  availableMinutes?: number;
+  motorStatus?: string;
+  motorRunningTime?: number;
+  status?: string;
+  suspendReason?: string;
+  useSource?: string;
+};
 
 export default function MasterDashboardPage() {
   const { data: session, status } = useSession();
@@ -243,18 +267,6 @@ export default function MasterDashboardPage() {
     loadData();
   };
 
-  const approveAdmin = async (id: string) => {
-    setError(null);
-    const res = await fetch("/api/admin/approve", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ adminId: id }),
-    });
-    const json = await res.json();
-    if (!res.ok) return setError(json.error || "Approve admin failed");
-    loadData();
-  };
-
   const rechargeUserMinutes = async (id: string, minutes: number) => {
     setError(null);
     const res = await fetch("/api/master/users/minutes", {
@@ -349,56 +361,87 @@ export default function MasterDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white px-4 py-8 text-slate-900">
-      <div className="mx-auto mt-2 flex max-w-6xl flex-col gap-6">
-        <header className="flex flex-col items-center gap-2 text-center">
-          <div>
-            <p className="text-sm uppercase tracking-[0.2em] text-blue-600">PumpPilot</p>
-            <h1 className="text-2xl font-semibold sm:text-3xl">Master Dashboard</h1>
-            <p className="text-sm text-slate-600">
-              Master Admin: {session?.user?.username || "-"}
-            </p>
-            <p className="text-sm text-slate-600">Create, approve, suspend and delete admins and users.</p>
-          </div>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <a
-              href="/api/history?format=csv&download=1&limit=100"
-              className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-slate-400 hover:text-slate-900"
-            >
-              Download History
-            </a>
-            <a
-              href="/master/change-password"
-              className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-slate-400 hover:text-slate-900"
-            >
-              Change Password
-            </a>
-            <button
-              onClick={() => signOut({ callbackUrl: "/admin/login" })}
-              className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:border-slate-400 hover:text-slate-900"
-            >
-              Logout
-            </button>
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#eff6ff,_#ffffff_38%,_#f8fafc_100%)] px-4 py-8 text-slate-900 sm:px-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
+        <header className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white/90 p-6 shadow-sm backdrop-blur sm:p-8">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+            <div className="max-w-3xl">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-blue-600">PumpPilot Control</p>
+              <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">Master Dashboard</h1>
+              <p className="mt-3 text-sm text-slate-600 sm:text-base">
+                Central command for admins, users, balances, RFID assignment, and system oversight.
+              </p>
+              <p className="mt-2 text-sm text-slate-500">Master Admin: {session?.user?.username || "-"}</p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <a
+                href="/api/history?format=csv&download=1&limit=100"
+                className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-400 hover:text-slate-900"
+              >
+                Download History
+              </a>
+              <a
+                href="/master/change-password"
+                className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-400 hover:text-slate-900"
+              >
+                Change Password
+              </a>
+              <button
+                onClick={() => signOut({ callbackUrl: "/admin/login" })}
+                className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-400 hover:text-slate-900"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </header>
 
-        {loading ? (
-          <DashboardMessage
-            variant="info"
-            title="Loading dashboard"
-            message="We are syncing admins, users, approval state, and system controls."
-          />
-        ) : null}
+        <section className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
+          <div className="flex flex-col gap-6">
+            {loading ? (
+              <DashboardMessage
+                variant="info"
+                title="Loading dashboard"
+                message="We are syncing admins, users, approval state, and system controls."
+              />
+            ) : null}
 
-        {error ? <DashboardMessage variant="error" title="Dashboard error" message={error} actionLabel="Retry" onAction={loadData} /> : null}
+            {error ? <DashboardMessage variant="error" title="Dashboard error" message={error} actionLabel="Retry" onAction={loadData} /> : null}
 
-        {overview ? <MasterStatsGrid overview={overview} /> : null}
+            {overview ? <MasterStatsGrid overview={overview} /> : null}
 
-        <MasterApprovalControl
-          manualAdminApproval={manualAdminApproval}
-          savingApprovalMode={savingApprovalMode}
-          onToggle={() => updateApprovalMode(!manualAdminApproval)}
-        />
+            <MasterApprovalControl
+              manualAdminApproval={manualAdminApproval}
+              savingApprovalMode={savingApprovalMode}
+              onToggle={() => updateApprovalMode(!manualAdminApproval)}
+            />
+          </div>
+
+          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Live Summary</div>
+            <div className="mt-1 text-lg font-semibold text-slate-950">System Snapshot</div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Connectivity</div>
+                <div className={`mt-2 text-sm font-semibold ${internetOnline ? "text-emerald-700" : "text-red-700"}`}>
+                  {internetOnline ? "Browser Online" : "Browser Offline"}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Admin Approval</div>
+                <div className="mt-2 text-sm font-semibold text-slate-900">
+                  {manualAdminApproval ? "Manual approval enabled" : "Auto approval enabled"}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Operational Focus</div>
+                <div className="mt-2 text-sm text-slate-600">
+                  Approve admins, manage balances, assign RFID cards, and supervise live motor activity.
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
 
         <MasterAdminsSection
           admins={allAdmins}
@@ -413,9 +456,7 @@ export default function MasterDashboardPage() {
         <MasterUsersSection
           users={allUsers}
           minuteDrafts={minuteDrafts}
-          onMinuteDraftChange={(userId, value) =>
-            setMinuteDrafts((prev) => ({ ...prev, [userId]: value }))
-          }
+          onMinuteDraftChange={(userId, value) => setMinuteDrafts((prev) => ({ ...prev, [userId]: value }))}
           onRechargeUserMinutes={rechargeUserMinutes}
           onSetUserAvailableMinutes={setUserAvailableMinutes}
           onStartUserMotor={startUserMotor}
@@ -443,7 +484,6 @@ export default function MasterDashboardPage() {
           onRfidUidChange={setRfidUid}
           onAssignRfid={assignRfid}
         />
-
       </div>
     </div>
   );
