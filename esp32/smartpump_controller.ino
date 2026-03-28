@@ -107,9 +107,13 @@ unsigned long lastPoll = 0;
 unsigned long lastRFID = 0;
 unsigned long lastSuccess = 0;
 unsigned long lastNetLog = 0;
+unsigned long lastCardSeenAt = 0;
 
 String lastLine1 = "";
 String lastLine2 = "";
+bool cardSessionActive = false;
+bool cardRemovalSent = false;
+String lastCardUid = "";
 
 // =========================
 // HELPERS
@@ -204,7 +208,21 @@ String readRFID() {
   return uid;
 }
 
-void pollServer(const String& uid = "") {
+bool isAnyCardPresent() {
+  byte atqa[2];
+  byte atqaSize = sizeof(atqa);
+  MFRC522::StatusCode result = rfid.PICC_WakeupA(atqa, &atqaSize);
+
+  if (result == MFRC522::STATUS_OK || result == MFRC522::STATUS_COLLISION) {
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return true;
+  }
+
+  return false;
+}
+
+void pollServer(const String& uid = "", bool includeUidParam = false) {
   if (WiFi.status() != WL_CONNECTED) {
     LOGLN("[HTTP] Skipped: WiFi not connected");
     return;
@@ -219,7 +237,7 @@ void pollServer(const String& uid = "") {
                "&ls=" + (ls ? "1" : "0") +
                "&dev=" + (dev ? "1" : "0");
 
-  if (uid.length()) {
+  if (includeUidParam) {
     url += "&uid=" + uid;
   }
 
@@ -265,6 +283,7 @@ void pollServer(const String& uid = "") {
     bool backendLS = doc["loadShedding"] | false;
     bool backendDev = doc["deviceReady"] | false;
     const char* cardMessage = doc["cardModeMessage"] | "";
+    bool backendCardModeActive = doc["cardModeActive"] | false;
 
     LOG("[STATE] motorStatus: ");
     LOGLN(status);
@@ -272,6 +291,8 @@ void pollServer(const String& uid = "") {
     LOGLN(backendLS ? "true" : "false");
     LOG("[STATE] backendDev: ");
     LOGLN(backendDev ? "true" : "false");
+    LOG("[STATE] backendCardMode: ");
+    LOGLN(backendCardModeActive ? "true" : "false");
 
     bool turnOn =
       (strcmp(status, "RUNNING") == 0) &&
@@ -293,6 +314,11 @@ void pollServer(const String& uid = "") {
 
     setMotor(turnOn);
     lastSuccess = millis();
+    cardSessionActive = backendCardModeActive;
+    if (!backendCardModeActive) {
+      cardRemovalSent = false;
+      lastCardUid = "";
+    }
 
     String line1 = "M:";
     line1 += turnOn ? "ON " : "OFF";
@@ -401,10 +427,26 @@ void loop() {
   String uid = readRFID();
   if (uid.length() && (lastRFID == 0 || millis() - lastRFID > RFID_DEBOUNCE_MS)) {
     lastRFID = millis();
+    lastCardSeenAt = millis();
+    cardSessionActive = true;
+    cardRemovalSent = false;
+    lastCardUid = uid;
     LOG("[RFID] Sending UID to server: ");
     LOGLN(uid);
     lcdMessage("RFID", uid.substring(0, 16));
-    pollServer(uid);
+    pollServer(uid, true);
+  }
+
+  if (cardSessionActive && !cardRemovalSent) {
+    const bool cardPresent = isAnyCardPresent();
+    if (cardPresent) {
+      lastCardSeenAt = millis();
+    } else if (lastCardSeenAt > 0 && millis() - lastCardSeenAt > RFID_DEBOUNCE_MS) {
+      LOGLN("[RFID] Card removed, notifying server");
+      lcdMessage("RFID Removed", lastCardUid.substring(0, 16));
+      pollServer("", true);
+      cardRemovalSent = true;
+    }
   }
 
   if (millis() - lastPoll > POLL_INTERVAL) {
