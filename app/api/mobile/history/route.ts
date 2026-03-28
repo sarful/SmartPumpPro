@@ -10,6 +10,7 @@ type HistoryLean = {
   date?: Date;
   usedMinutes?: number;
   addedMinutes?: number;
+  currentBalance?: number;
   userId?: unknown;
   adminId?: unknown;
 };
@@ -50,6 +51,7 @@ export async function GET(req: NextRequest) {
       date: entry.date || null,
       usedMinutes: entry.usedMinutes ?? null,
       addedMinutes: entry.addedMinutes ?? null,
+      currentBalance: entry.currentBalance ?? null,
       userName: getPopulatedUsername(entry.userId),
       adminName: getPopulatedUsername(entry.adminId),
     }));

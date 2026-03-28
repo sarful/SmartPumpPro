@@ -3,10 +3,15 @@ import mongoose, { Schema, Model, Types } from 'mongoose';
 export type UsageEvent =
   | 'motor_start'
   | 'motor_stop'
+  | 'motor_extend'
   | 'recharge'
   | 'attendance'
   | 'hold'
   | 'resume'
+  | 'queue_reset'
+  | 'user_suspend'
+  | 'user_unsuspend'
+  | 'user_delete'
   | 'system_device_ready'
   | 'system_device_not_ready'
   | 'system_loadshedding_on'
@@ -19,6 +24,7 @@ export interface UsageHistoryDocument extends mongoose.Document {
   adminId: Types.ObjectId;
   usedMinutes?: number;
   addedMinutes?: number;
+  currentBalance?: number;
   event: UsageEvent;
   date: Date;
   meta?: Record<string, unknown>;
@@ -30,15 +36,21 @@ const usageHistorySchema = new Schema<UsageHistoryDocument>(
     adminId: { type: Schema.Types.ObjectId, ref: 'Admin', required: true, index: true },
     usedMinutes: { type: Number },
     addedMinutes: { type: Number },
+    currentBalance: { type: Number },
     event: {
       type: String,
       enum: [
         'motor_start',
         'motor_stop',
+        'motor_extend',
         'recharge',
         'attendance',
         'hold',
         'resume',
+        'queue_reset',
+        'user_suspend',
+        'user_unsuspend',
+        'user_delete',
         'system_device_ready',
         'system_device_not_ready',
         'system_loadshedding_on',

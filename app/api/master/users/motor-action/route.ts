@@ -7,6 +7,7 @@ import { addToQueue, getQueuePosition } from "@/lib/queue-engine";
 import { calculateUsedMinutes, stopMotorForUser } from "@/lib/timer-engine";
 import { isDeviceReadyEffective } from "@/lib/device-readiness";
 import { requireWebMutationSession } from "@/lib/web-mutation-auth";
+import { logEvent } from "@/lib/usage-logger";
 
 type Body = {
   userId?: string;
@@ -65,6 +66,14 @@ export async function POST(req: NextRequest) {
       user.motorStartTime = null;
       user.motorStatus = "OFF";
       await user.save();
+
+      await logEvent({
+        adminId: user.adminId,
+        userId: user._id,
+        event: "queue_reset",
+        currentBalance: user.availableMinutes,
+        meta: { source: "master_stop_reset", action: "queue_reset" },
+      });
 
       return NextResponse.json({
         success: true,

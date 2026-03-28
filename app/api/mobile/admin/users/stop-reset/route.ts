@@ -4,6 +4,7 @@ import { getMobileAccessPayload } from "@/lib/mobile-request-auth";
 import User from "@/models/User";
 import Queue from "@/models/Queue";
 import { calculateUsedMinutes, stopMotorForUser } from "@/lib/timer-engine";
+import { logEvent } from "@/lib/usage-logger";
 
 type Body = { userId?: string };
 
@@ -52,6 +53,14 @@ export async function POST(req: NextRequest) {
     user.motorStartTime = null;
     user.motorStatus = "OFF";
     await user.save();
+
+    await logEvent({
+      adminId: user.adminId,
+      userId: user._id,
+      event: "queue_reset",
+      currentBalance: user.availableMinutes,
+      meta: { source: "mobile_admin_stop_reset", action: "queue_reset" },
+    });
 
     return NextResponse.json({ success: true, usedMinutes: 0, refundedMinutes: 0 });
   } catch (error) {

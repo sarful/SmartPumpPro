@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import { getMobileAccessPayload } from "@/lib/mobile-request-auth";
 import User from "@/models/User";
+import { logEvent } from "@/lib/usage-logger";
 
 type Body = { userId?: string };
 
@@ -31,6 +32,13 @@ export async function POST(req: NextRequest) {
     ).lean();
 
     if (!updated) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    await logEvent({
+      adminId,
+      userId: body.userId,
+      event: "user_unsuspend",
+      currentBalance: updated.availableMinutes,
+      meta: { source: "mobile_admin_unsuspend" },
+    });
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("mobile admin unsuspend user error", error);

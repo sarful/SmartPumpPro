@@ -10,6 +10,7 @@ type HistoryEntry = {
   date: string;
   usedMinutes?: number;
   addedMinutes?: number;
+  currentBalance?: number;
   userId?: { username?: string } | string;
   adminId?: { username?: string } | string;
 };
@@ -17,10 +18,15 @@ type HistoryEntry = {
 const eventLabel: Record<string, string> = {
   motor_start: "Motor Start",
   motor_stop: "Motor Stop",
+  motor_extend: "Motor Extend",
   recharge: "Recharge",
   attendance: "Attendance",
   hold: "Hold",
   resume: "Resume",
+  queue_reset: "Queue Reset",
+  user_suspend: "User Suspend",
+  user_unsuspend: "User Unsuspend",
+  user_delete: "User Delete",
   system_device_ready: "Device Ready",
   system_device_not_ready: "Device Not Ready",
   system_loadshedding_on: "Loadshedding On",
@@ -113,19 +119,20 @@ export default function LogsPage() {
                 <th className="px-4 py-3 font-semibold">User</th>
                 <th className="px-4 py-3 font-semibold">Used</th>
                 <th className="px-4 py-3 font-semibold">Added</th>
+                <th className="px-4 py-3 font-semibold">Current Balance</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
                 <tr>
-                  <td className="px-4 py-4 text-slate-500" colSpan={6}>
+                  <td className="px-4 py-4 text-slate-500" colSpan={7}>
                     Loading logs...
                   </td>
                 </tr>
               )}
               {!loading && entries.length === 0 && (
                 <tr>
-                  <td className="px-4 py-4 text-slate-500" colSpan={6}>
+                  <td className="px-4 py-4 text-slate-500" colSpan={7}>
                     No logs found yet.
                   </td>
                 </tr>
@@ -139,6 +146,7 @@ export default function LogsPage() {
                     <td className="px-4 py-3">{resolveName(entry.userId)}</td>
                     <td className="px-4 py-3">{entry.usedMinutes ?? "-"}</td>
                     <td className="px-4 py-3">{entry.addedMinutes ?? "-"}</td>
+                    <td className="px-4 py-3">{entry.currentBalance ?? "-"}</td>
                   </tr>
                 ))}
             </tbody>

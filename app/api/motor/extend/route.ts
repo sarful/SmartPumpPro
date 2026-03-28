@@ -5,6 +5,7 @@ import Queue from '@/models/Queue';
 import Admin from '@/models/Admin';
 import { enforceRateLimit } from '@/lib/api-guard';
 import { requireWebMutationSession } from '@/lib/web-mutation-auth';
+import { logEvent } from '@/lib/usage-logger';
 
 type Body = {
   userId?: string;
@@ -75,6 +76,15 @@ export async function POST(req: NextRequest) {
       { adminId: user.adminId, userId: user._id, status: 'RUNNING' },
       { $inc: { requestedMinutes: minutes } },
     ).lean();
+
+    await logEvent({
+      adminId: user.adminId,
+      userId: user._id,
+      event: 'motor_extend',
+      usedMinutes: minutes,
+      currentBalance: user.availableMinutes,
+      meta: { source: 'web_extend', extendedMinutes: minutes },
+    });
 
     return NextResponse.json({
       success: true,

@@ -9,6 +9,7 @@ type LogParams = {
   event: UsageEvent;
   usedMinutes?: number;
   addedMinutes?: number;
+  currentBalance?: number;
   meta?: Record<string, unknown>;
 };
 
@@ -25,12 +26,18 @@ export async function logEvent(params: LogParams) {
   await connectDB();
   const resolvedUserId = await resolveUserId(params.adminId, params.userId);
   if (!resolvedUserId) return;
+  let currentBalance = params.currentBalance;
+  if (typeof currentBalance !== 'number') {
+    const user = await User.findById(resolvedUserId).select({ availableMinutes: 1 }).lean();
+    currentBalance = user?.availableMinutes;
+  }
   await UsageHistory.create({
     adminId: params.adminId,
     userId: resolvedUserId,
     event: params.event,
     usedMinutes: params.usedMinutes,
     addedMinutes: params.addedMinutes,
+    currentBalance,
     meta: params.meta,
   });
 }
@@ -56,6 +63,8 @@ export async function logReadinessTransitions(params: {
   await connectDB();
   const resolvedUserId = await resolveUserId(params.adminId, params.userId);
   if (!resolvedUserId) return;
+  const user = await User.findById(resolvedUserId).select({ availableMinutes: 1 }).lean();
+  const currentBalance = user?.availableMinutes;
 
   for (const t of TRANSITIONS) {
     const desiredEvent = params.current[t.key] ? t.on : t.off;
@@ -73,6 +82,7 @@ export async function logReadinessTransitions(params: {
       adminId: params.adminId,
       userId: resolvedUserId,
       event: desiredEvent,
+      currentBalance,
       meta: {
         ...(params.meta || {}),
         systemReadiness: {

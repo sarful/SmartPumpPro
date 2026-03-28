@@ -8,6 +8,7 @@ import Admin from "@/models/Admin";
 import Queue from "@/models/Queue";
 import User from "@/models/User";
 import { isDeviceReadyEffective } from "@/lib/device-readiness";
+import { logEvent } from "@/lib/usage-logger";
 
 type Body = {
   userId?: string;
@@ -49,6 +50,13 @@ export async function POST(req: NextRequest) {
         { returnDocument: 'after' },
       ).lean();
       if (!updated) return NextResponse.json({ error: "User not found" }, { status: 404 });
+      await logEvent({
+        adminId: updated.adminId,
+        userId,
+        event: "user_suspend",
+        currentBalance: updated.availableMinutes,
+        meta: { source: "mobile_master_suspend", reason: updated.suspendReason || null },
+      });
       return NextResponse.json({ success: true });
     }
 
@@ -59,6 +67,13 @@ export async function POST(req: NextRequest) {
         { returnDocument: 'after' },
       ).lean();
       if (!updated) return NextResponse.json({ error: "User not found" }, { status: 404 });
+      await logEvent({
+        adminId: updated.adminId,
+        userId,
+        event: "user_unsuspend",
+        currentBalance: updated.availableMinutes,
+        meta: { source: "mobile_master_unsuspend" },
+      });
       return NextResponse.json({ success: true });
     }
 
@@ -94,6 +109,14 @@ export async function POST(req: NextRequest) {
       user.motorStartTime = null;
       user.motorStatus = "OFF";
       await user.save();
+
+      await logEvent({
+        adminId: user.adminId,
+        userId: user._id,
+        event: "queue_reset",
+        currentBalance: user.availableMinutes,
+        meta: { source: "mobile_master_stop_reset", action: "queue_reset" },
+      });
 
       return NextResponse.json({
         success: true,
@@ -147,6 +170,19 @@ export async function POST(req: NextRequest) {
     }
 
     if (normalizedAction === "delete") {
+      const user = await User.findById(userId).lean();
+      if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+      await logEvent({
+        adminId: user.adminId,
+        userId,
+        event: "user_delete",
+        currentBalance: user.availableMinutes,
+        meta: {
+          source: "mobile_master_delete",
+          username: user.username,
+          motorStatus: user.motorStatus,
+        },
+      });
       const deleted = await User.deleteOne({ _id: userId });
       if (!deleted.deletedCount) return NextResponse.json({ error: "User not found" }, { status: 404 });
       return NextResponse.json({ success: true });

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import User from '@/models/User';
 import { requireWebMutationSession } from '@/lib/web-mutation-auth';
+import { logEvent } from '@/lib/usage-logger';
 
 export async function POST(req: NextRequest) {
   const authResult = await requireWebMutationSession(['master']);
@@ -25,6 +26,14 @@ export async function POST(req: NextRequest) {
   ).lean();
 
   if (!updated) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
+  await logEvent({
+    adminId: updated.adminId,
+    userId: updated._id,
+    event: 'user_unsuspend',
+    currentBalance: updated.availableMinutes,
+    meta: { source: 'master_unsuspend' },
+  });
 
   return NextResponse.json({ success: true, userId: updated._id });
 }

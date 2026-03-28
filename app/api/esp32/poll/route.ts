@@ -8,7 +8,7 @@ import { getQueuePosition } from '@/lib/queue-engine';
 import { MIN_RUNTIME_THRESHOLD, tickUnifiedMotorSessions } from '@/lib/timer-engine';
 import { activateLoadShedding, clearLoadShedding } from '@/lib/loadshedding-engine';
 import { isDeviceOnline, isDeviceReadyEffective } from '@/lib/device-readiness';
-import { logReadinessTransitions } from '@/lib/usage-logger';
+import { logEvent, logReadinessTransitions } from '@/lib/usage-logger';
 import { finalizeCardModeSession, normalizeRfidUid } from '@/lib/card-mode';
 import {
   getDeviceSecretHeaderName,
@@ -356,6 +356,19 @@ export async function GET(req: NextRequest) {
           },
         },
       ).exec();
+      if (isNewSession) {
+        await logEvent({
+          adminId: adminLookupId,
+          userId: cardUser._id,
+          event: 'motor_start',
+          meta: {
+            source: 'card_mode',
+            requestedMinutes: cardUser.availableMinutes ?? 0,
+            cardMode: true,
+            uid,
+          },
+        });
+      }
       const freshCardUser = await User.findById(cardUser._id)
         .select({ motorStatus: 1, motorRunningTime: 1, availableMinutes: 1, adminId: 1, username: 1, status: 1 })
         .lean();

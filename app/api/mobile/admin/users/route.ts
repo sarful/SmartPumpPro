@@ -3,6 +3,7 @@ import { hash } from "bcryptjs";
 import { connectDB } from "@/lib/mongodb";
 import { getMobileAccessPayload } from "@/lib/mobile-request-auth";
 import User from "@/models/User";
+import { logEvent } from "@/lib/usage-logger";
 
 type Body = {
   username?: string;
@@ -88,6 +89,18 @@ export async function DELETE(req: NextRequest) {
     if (!deleted) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
+
+    await logEvent({
+      adminId: payload.adminId || payload.sub,
+      userId,
+      event: "user_delete",
+      currentBalance: deleted.availableMinutes,
+      meta: {
+        source: "mobile_admin_delete",
+        username: deleted.username,
+        motorStatus: deleted.motorStatus,
+      },
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

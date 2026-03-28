@@ -4,6 +4,7 @@ import { getMobileAccessPayload } from "@/lib/mobile-request-auth";
 import User from "@/models/User";
 import Queue from "@/models/Queue";
 import Admin from "@/models/Admin";
+import { logEvent } from "@/lib/usage-logger";
 
 type Body = { minutes?: number };
 
@@ -54,6 +55,15 @@ export async function POST(req: NextRequest) {
       { adminId: user.adminId, userId: user._id, status: "RUNNING" },
       { $inc: { requestedMinutes: minutes } },
     ).lean();
+
+    await logEvent({
+      adminId: user.adminId,
+      userId: user._id,
+      event: "motor_extend",
+      usedMinutes: minutes,
+      currentBalance: user.availableMinutes,
+      meta: { source: "mobile_user_extend", extendedMinutes: minutes },
+    });
 
     return NextResponse.json({
       success: true,

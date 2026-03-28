@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import { connectDB } from '@/lib/mongodb';
 import Admin from '@/models/Admin';
 import User from '@/models/User';
+import { logEvent } from '@/lib/usage-logger';
 
 export type CardModeStopReason = 'removed' | 'insufficient' | 'admin_override' | 'unknown_uid';
 
@@ -69,6 +70,19 @@ export async function finalizeCardModeSession(params: {
         },
       },
     ).exec();
+
+    await logEvent({
+      adminId: adminObjectId,
+      userId: admin.cardActiveUserId,
+      event: 'motor_stop',
+      usedMinutes,
+      currentBalance: remaining,
+      meta: {
+        source: 'card_mode',
+        reason: params.reason,
+        cardMode: true,
+      },
+    });
 
     return {
       ended: true,

@@ -5,6 +5,7 @@ import { hash } from 'bcryptjs';
 import Admin from '@/models/Admin';
 import { requireWebMutationSession } from '@/lib/web-mutation-auth';
 import { tickUnifiedMotorSessions } from '@/lib/timer-engine';
+import { logEvent } from '@/lib/usage-logger';
 
 type UserLean = {
   _id: unknown;
@@ -96,6 +97,18 @@ export async function DELETE(req: NextRequest) {
   await connectDB();
   const deleted = await User.findOneAndDelete({ _id: userId, adminId: session.user.adminId }).lean();
   if (!deleted) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
+  await logEvent({
+    adminId: session.user.adminId!,
+    userId,
+    event: 'user_delete',
+    currentBalance: deleted.availableMinutes,
+    meta: {
+      source: 'admin_delete',
+      username: deleted.username,
+      motorStatus: deleted.motorStatus,
+    },
+  });
 
   return NextResponse.json({ success: true });
 }

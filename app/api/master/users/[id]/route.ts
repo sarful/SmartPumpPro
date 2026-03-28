@@ -3,6 +3,7 @@ import { connectDB } from '@/lib/mongodb';
 import User from '@/models/User';
 import { Types } from 'mongoose';
 import { requireWebMutationSession } from '@/lib/web-mutation-auth';
+import { logEvent } from '@/lib/usage-logger';
 
 type ParamsObj = { id: string };
 
@@ -19,6 +20,17 @@ export async function DELETE(req: NextRequest, context: { params: Promise<Params
   const user = await User.findById(userId).lean();
   if (!user) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
+  await logEvent({
+    adminId: user.adminId,
+    userId,
+    event: 'user_delete',
+    currentBalance: user.availableMinutes,
+    meta: {
+      source: 'master_delete',
+      username: user.username,
+      motorStatus: user.motorStatus,
+    },
+  });
   await User.deleteOne({ _id: userId });
   return NextResponse.json({ success: true });
 }

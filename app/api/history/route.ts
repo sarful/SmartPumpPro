@@ -15,6 +15,7 @@ type HistoryEntry = {
   userId?: PopulatedRef;
   usedMinutes?: number;
   addedMinutes?: number;
+  currentBalance?: number;
   meta?: unknown;
 };
 
@@ -124,6 +125,7 @@ export async function GET(req: NextRequest) {
       'userUsername',
       'usedMinutes',
       'addedMinutes',
+      'currentBalance',
       'systemDeviceReady',
       'systemLoadShedding',
       'systemInternet',
@@ -146,6 +148,7 @@ export async function GET(req: NextRequest) {
         typeof entry.userId === 'object' ? entry.userId?.username ?? '' : '',
         entry.usedMinutes ?? '',
         entry.addedMinutes ?? '',
+        entry.currentBalance ?? '',
         readiness.deviceReady,
         readiness.loadShedding,
         readiness.internetOnline,
